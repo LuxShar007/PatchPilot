@@ -60,11 +60,39 @@ def run_cmd(cmd, cwd=None, check=True):
     return result
 
 
+BASELINE_APP_CODE = """\"\"\"Mock application module with an intentional baseline bug for PatchPilot verification.\"\"\"
+
+
+def process_user_data(user_dict: dict) -> dict:
+    \"\"\"Process user profile dictionary.
+
+    Baseline BUG: Direct indexing causes KeyError when 'role' is missing in user_dict.
+    \"\"\"
+    return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
+
+
+def get_user_role(user: dict) -> str:
+    \"\"\"Retrieve user role.\"\"\"
+    data = process_user_data(user)
+    return data['role'].lower()
+
+
+def format_user_badge(user: dict) -> str:
+    \"\"\"Format user badge display string.\"\"\"
+    name = user.get("name", "Anonymous")
+    data = process_user_data(user)
+    return f"[{data['role']}] {name}"
+"""
+
+
 def setup_mock_project_git_repo():
     """Initialize mock_project as a git repository with baseline commit."""
     print("\n[1/6] Setting up mock_project Git repository...")
     git_bin = get_git_command()
     git_dir = MOCK_PROJECT_DIR / ".git"
+
+    # Always ensure baseline buggy app.py is written
+    (MOCK_PROJECT_DIR / "app.py").write_text(BASELINE_APP_CODE, encoding="utf-8")
 
     if not git_dir.exists():
         run_cmd([git_bin, "init"], cwd=MOCK_PROJECT_DIR)
@@ -74,6 +102,7 @@ def setup_mock_project_git_repo():
         # Reset any working tree modifications
         run_cmd([git_bin, "reset", "--hard", "HEAD"], cwd=MOCK_PROJECT_DIR, check=False)
         run_cmd([git_bin, "clean", "-fd"], cwd=MOCK_PROJECT_DIR, check=False)
+        (MOCK_PROJECT_DIR / "app.py").write_text(BASELINE_APP_CODE, encoding="utf-8")
 
     # Ensure baseline app.py and test_app.py are in place
     run_cmd([git_bin, "add", "app.py", "test_app.py"], cwd=MOCK_PROJECT_DIR)

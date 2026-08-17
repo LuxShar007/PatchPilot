@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+
+# Git sub-testbeds
+laptop-bridge/mock_project/.git/
+
+# Operating System
+.DS_Store
+Thumbs.db

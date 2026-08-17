@@ -76,7 +76,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "timestamp": datetime.datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()}
 
 
 @app.get("/status")
@@ -94,7 +94,7 @@ def get_status() -> Dict[str, Any]:
 
 def execute_patch_pipeline(patch_path: Path) -> Dict[str, Any]:
     """Apply a git patch to mock_project and run pytest verification."""
-    timestamp = datetime.datetime.utcnow().isoformat()
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
     patch_name = patch_path.name
     print(f"\n[+] Processing incoming patch: {patch_name}")
 

@@ -5,13 +5,13 @@ import 'screens/scanner_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Set system overlay for immersive dark theme
+  // Set system overlay for clean light minimalist theme
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Color(0xFF090D16),
-      systemNavigationBarIconBrightness: Brightness.light,
+      statusBarIconBrightness: Brightness.dark,
+      systemNavigationBarColor: Color(0xFFF7F7F5),
+      systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
 
@@ -26,30 +26,39 @@ class PatchPilotApp extends StatelessWidget {
     return MaterialApp(
       title: 'PatchPilot',
       debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.dark,
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF090D16),
-        primaryColor: const Color(0xFF0284C7),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF0284C7),
-          secondary: Color(0xFF38BDF8),
-          surface: Color(0xFF0F172A),
+      themeMode: ThemeMode.light,
+      theme: ThemeData(
+        brightness: Brightness.light,
+        scaffoldBackgroundColor: const Color(0xFFF7F7F5),
+        primaryColor: const Color(0xFF111111),
+        cardColor: const Color(0xFFFCFCFB),
+        colorScheme: const ColorScheme.light(
+          primary: Color(0xFF111111),
+          secondary: Color(0xFF6B6B6B),
+          surface: Color(0xFFFCFCFB),
           error: Color(0xFFEF4444),
           onPrimary: Colors.white,
           onSecondary: Colors.white,
-          onSurface: Color(0xFFF8FAFC),
+          onSurface: Color(0xFF111111),
         ),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0F172A),
+          backgroundColor: Color(0xFFF7F7F5),
           elevation: 0,
           centerTitle: false,
+          iconTheme: IconThemeData(color: Color(0xFF111111)),
+          titleTextStyle: TextStyle(
+            color: Color(0xFF111111),
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.5,
+          ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF0284C7),
+            backgroundColor: const Color(0xFF111111),
             foregroundColor: Colors.white,
-            textStyle: const TextStyle(fontWeight: FontWeight.bold),
+            shape: const StadiumBorder(),
+            textStyle: const TextStyle(fontWeight: FontWeight.w600, letterSpacing: -0.2),
           ),
         ),
       ),

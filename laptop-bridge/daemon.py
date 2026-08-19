@@ -92,6 +92,40 @@ def get_status() -> Dict[str, Any]:
     }
 
 
+from pydantic import BaseModel
+
+
+class PatchPayload(BaseModel):
+    filename: Optional[str] = "fix.patch"
+    patch: str
+
+
+@app.post("/apply-patch")
+def apply_patch_endpoint(payload: PatchPayload) -> Dict[str, Any]:
+    """Receive git patch via HTTP, write to inbox, and run CI/CD pipeline."""
+    fname = payload.filename or "fix.patch"
+    if not fname.endswith(".patch"):
+        fname = f"{fname}.patch"
+
+    patch_path = INBOX_DIR / fname
+    INBOX_DIR.mkdir(parents=True, exist_ok=True)
+    patch_path.write_text(payload.patch, encoding="utf-8")
+
+    # Mark as processed to prevent double execution if watchdog is active
+    try:
+        stat = patch_path.stat()
+        processed_patches.add((str(patch_path.resolve()), stat.st_mtime, stat.st_size))
+    except Exception:
+        pass
+
+    record = execute_patch_pipeline(patch_path)
+    return {
+        "status": "success" if record["build_status"] == "BUILD PASSING" else "failed",
+        "record": record,
+        "message": f"Patch {fname} processed. Build status: {record['build_status']}",
+    }
+
+
 def execute_patch_pipeline(patch_path: Path) -> Dict[str, Any]:
     """Apply a git patch to mock_project and run pytest verification."""
     timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()

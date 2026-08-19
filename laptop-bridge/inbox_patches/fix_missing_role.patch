@@ -1,0 +1,14 @@
+diff --git a/app.py b/app.py
+index a71cde9..852dc52 100644
+--- a/app.py
++++ b/app.py
+@@ -6,7 +6,8 @@ def process_user_data(user_dict: dict) -> dict:
+ 
+     Baseline BUG: Direct indexing causes KeyError when 'role' is missing in user_dict.
+     """
+-    return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
++    role = user_dict.get('role', 'user')
++    return {'name': user_dict['name'], 'role': role.upper(), 'status': 'active'}
+ 
+ 
+ def get_user_role(user: dict) -> str:

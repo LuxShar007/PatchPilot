@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui';
 
 /// Represents a detected visual text bounding box from Google ML Kit OCR

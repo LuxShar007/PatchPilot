@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 /// Formatted interactive Diff Viewer for PatchPilot with colored unified diff rendering
 class DiffViewer extends StatelessWidget {
@@ -18,45 +17,78 @@ class DiffViewer extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A), // Dark slate IDE background
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF334155), width: 1.2),
+        color: const Color(0xFF18181B), // Dark zinc IDE surface
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF27272A), width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header Bar
+          // Minimalist Window Header Bar
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: const BoxDecoration(
-              color: Color(0xFF1E293B),
+              color: Color(0xFF121215),
               borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(11),
-                topRight: Radius.circular(11),
+                topLeft: Radius.circular(19),
+                topRight: Radius.circular(19),
               ),
               border: Border(
-                bottom: BorderSide(color: Color(0xFF334155), width: 1),
+                bottom: BorderSide(color: Color(0xFF27272A), width: 1),
               ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.code, color: Color(0xFF38BDF8), size: 18),
+                // Three subtle window controls
+                Row(
+                  children: [
+                    Container(
+                      width: 9,
+                      height: 9,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 9,
+                      height: 9,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFF59E0B),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 9,
+                      height: 9,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF10B981),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 14),
+                const Icon(Icons.code_rounded, color: Color(0xFFA1A1AA), size: 16),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     fileName ?? 'patch.diff',
                     style: const TextStyle(
                       fontFamily: 'monospace',
-                      color: Color(0xFFF1F5F9),
+                      color: Color(0xFFF4F4F5),
                       fontWeight: FontWeight.w600,
-                      fontSize: 13,
+                      fontSize: 12.5,
+                      letterSpacing: -0.2,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -64,16 +96,15 @@ class DiffViewer extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0EA5E9).withOpacity(0.15),
+                    color: const Color(0xFF27272A),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFF0EA5E9).withOpacity(0.4)),
                   ),
                   child: const Text(
                     'UNIFIED DIFF',
                     style: TextStyle(
-                      color: Color(0xFF38BDF8),
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFA1A1AA),
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
                       letterSpacing: 0.5,
                     ),
                   ),
@@ -103,39 +134,39 @@ class DiffViewer extends StatelessWidget {
   }
 
   Widget _buildDiffLine(String line, int lineNumber) {
-    Color textColor = const Color(0xFFCBD5E1); // Default slate text
+    Color textColor = const Color(0xFFD4D4D8);
     Color bgColor = Colors.transparent;
     Widget? prefixIcon;
 
     if (line.startsWith('+') && !line.startsWith('+++')) {
-      // Added line
-      textColor = const Color(0xFF4ADE80); // Emerald green
-      bgColor = const Color(0xFF052E16).withOpacity(0.6);
+      // Insertions: Translucent emerald green
+      textColor = const Color(0xFF34D399);
+      bgColor = const Color(0x2210B981);
       prefixIcon = const Text(
         '+',
-        style: TextStyle(color: Color(0xFF22C55E), fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+        style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontFamily: 'monospace'),
       );
     } else if (line.startsWith('-') && !line.startsWith('---')) {
-      // Removed line
-      textColor = const Color(0xFFF87171); // Crimson red
-      bgColor = const Color(0xFF450A0A).withOpacity(0.6);
+      // Deletions: Translucent red
+      textColor = const Color(0xFFF87171);
+      bgColor = const Color(0x22EF4444);
       prefixIcon = const Text(
         '-',
         style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontFamily: 'monospace'),
       );
     } else if (line.startsWith('@@')) {
       // Hunk header
-      textColor = const Color(0xFF38BDF8); // Cyan
-      bgColor = const Color(0xFF082F49).withOpacity(0.5);
+      textColor = const Color(0xFF93C5FD);
+      bgColor = const Color(0x223B82F6);
     } else if (line.startsWith('---') || line.startsWith('+++')) {
       // File header
-      textColor = const Color(0xFF94A3B8);
-      bgColor = const Color(0xFF1E293B).withOpacity(0.3);
+      textColor = const Color(0xFFA1A1AA);
+      bgColor = const Color(0xFF27272A).withValues(alpha: 0.5);
     }
 
     return Container(
       color: bgColor,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2.5),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,7 +180,7 @@ class DiffViewer extends StatelessWidget {
               style: const TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 11,
-                color: Color(0xFF475569),
+                color: Color(0xFF71717A),
               ),
             ),
           ),

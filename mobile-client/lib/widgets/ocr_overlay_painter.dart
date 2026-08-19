@@ -37,16 +37,19 @@ class OcrOverlayPainter extends CustomPainter {
 
       if (box.isErrorSignature) {
         borderPaint.color = const Color(0xFFEF4444); // Crimson red
-        fillPaint.color = const Color(0xFFEF4444).withOpacity(0.2);
+        borderPaint.strokeWidth = 2.0;
+        fillPaint.color = const Color(0xFFEF4444).withValues(alpha: 0.15);
       } else if (box.isStackTrace) {
         borderPaint.color = const Color(0xFFF59E0B); // Amber
-        fillPaint.color = const Color(0xFFF59E0B).withOpacity(0.15);
+        borderPaint.strokeWidth = 1.5;
+        fillPaint.color = const Color(0xFFF59E0B).withValues(alpha: 0.1);
       } else {
-        borderPaint.color = const Color(0xFF0EA5E9).withOpacity(0.6); // Cyan
-        fillPaint.color = const Color(0xFF0EA5E9).withOpacity(0.06);
+        borderPaint.color = const Color(0xFF111111).withValues(alpha: 0.4); // Subtle dark/slate
+        borderPaint.strokeWidth = 1.0;
+        fillPaint.color = const Color(0xFF111111).withValues(alpha: 0.03);
       }
 
-      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(4));
+      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(6));
       canvas.drawRRect(rrect, fillPaint);
       canvas.drawRRect(rrect, borderPaint);
 
@@ -54,11 +57,12 @@ class OcrOverlayPainter extends CustomPainter {
       if (box.isErrorSignature) {
         final textPainter = TextPainter(
           text: const TextSpan(
-            text: ' ERROR DETECTED ',
+            text: ' ! ERROR ',
             style: TextStyle(
               color: Colors.white,
               fontSize: 9,
-              fontWeight: FontWeight.bold,
+              fontFamily: 'monospace',
+              fontWeight: FontWeight.w700,
               backgroundColor: Color(0xFFEF4444),
             ),
           ),

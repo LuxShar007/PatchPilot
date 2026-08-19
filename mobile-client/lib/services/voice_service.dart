@@ -67,11 +67,13 @@ class VoiceService {
             _notify();
             if (onResult != null) onResult(_lastWords);
           },
-          listenFor: const Duration(seconds: 15),
-          pauseFor: const Duration(seconds: 3),
-          partialResults: true,
-          cancelOnError: true,
-          listenMode: ListenMode.confirmation,
+          listenOptions: SpeechListenOptions(
+            listenMode: ListenMode.confirmation,
+            cancelOnError: true,
+            partialResults: true,
+            listenFor: const Duration(seconds: 15),
+            pauseFor: const Duration(seconds: 3),
+          ),
         );
       } else {
         // Fallback for emulator / non-mic environments

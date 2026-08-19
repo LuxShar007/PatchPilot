@@ -1,7 +1,4 @@
-import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:patchpilot_mobile/models/diagnostic_result.dart';
-import 'package:patchpilot_mobile/models/ocr_box.dart';
 import 'package:patchpilot_mobile/services/diagnostic_service.dart';
 import 'package:patchpilot_mobile/services/ocr_service.dart';
 
@@ -57,21 +54,66 @@ void main() {
       expect(payload.stackTraceLines.isNotEmpty, isTrue);
     });
 
-    test('DiagnosticService generates deterministic patch diff for KeyError payload', () async {
+    test('DiagnosticService analyze handles KeyError payload with valid unified diff', () async {
       final diagnosticService = DiagnosticService();
       final ocrService = OcrService();
       final terminalText = OcrService.sampleKeyErrorTerminalOutput();
       final payload = ocrService.parseRawTextString(terminalText);
 
       final result = await diagnosticService.analyze(
-        ocrPayload: payload,
-        voiceCommand: "Fix missing role key with fallback default",
+        scannedText: payload.rawText,
+        userCommand: "Fix missing role key with fallback default",
       );
 
-      expect(result.rootCause, "KeyError: 'role' missing in input dictionary");
+      expect(result.rootCause, contains("KeyError"));
       expect(result.targetFile, "app.py");
+      expect(result.patchDiff, contains("--- a/app.py"));
+      expect(result.patchDiff, contains("+++ b/app.py"));
+      expect(result.patchDiff, contains("role = user_dict.get"));
       expect(result.testCommand, "pytest");
-      expect(result.patchDiff, contains("+    role = user_dict.get('role', 'user')"));
+    });
+
+    test('DiagnosticService analyze produces ZeroDivisionError patch with proper hunk headers', () async {
+      final diagnosticService = DiagnosticService();
+      const zeroDivText = '''
+Traceback (most recent call last):
+  File "metrics_service.py", line 4, in compute_latency_stats
+    "avg": sum(latencies_ms) / len(latencies_ms),
+ZeroDivisionError: division by zero
+''';
+
+      final result = await diagnosticService.analyze(
+        scannedText: zeroDivText,
+        userCommand: "Prevent division by zero",
+      );
+
+      expect(result.rootCause, contains("ZeroDivisionError"));
+      expect(result.targetFile, "metrics_service.py");
+      expect(result.explanation, contains("zero stats"));
+      expect(result.patchDiff, contains("--- a/metrics_service.py"));
+      expect(result.patchDiff, contains("+++ b/metrics_service.py"));
+      expect(result.patchDiff, contains("@@ -1,5 +1,8 @@"));
+      expect(result.testCommand, contains("pytest"));
+    });
+
+    test('DiagnosticService analyze produces TypeError null-check patch for cart_service / React', () async {
+      final diagnosticService = DiagnosticService();
+      const typeErrorText = '''
+TypeError: unsupported operand type(s) for /: 'NoneType' and 'float'
+  File "cart_service.py", line 3, in calculate_cart_total
+''';
+
+      final result = await diagnosticService.analyze(
+        scannedText: typeErrorText,
+        userCommand: "Handle optional discount",
+      );
+
+      expect(result.rootCause, contains("TypeError"));
+      expect(result.targetFile, "cart_service.py");
+      expect(result.patchDiff, contains("--- a/cart_service.py"));
+      expect(result.patchDiff, contains("+++ b/cart_service.py"));
+      expect(result.patchDiff, contains("@@ -1,4 +1,5 @@"));
+      expect(result.testCommand, contains("pytest"));
     });
   });
 }

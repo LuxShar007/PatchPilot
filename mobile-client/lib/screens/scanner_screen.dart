@@ -1,11 +1,12 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../models/diagnostic_result.dart';
 import '../models/ocr_box.dart';
 import '../services/diagnostic_service.dart';
 import '../services/ocr_service.dart';
@@ -98,15 +99,19 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
     if (_cameraController == null || !_cameraController!.value.isInitialized) return;
     if (_isCameraStreaming) return;
 
-    _isCameraStreaming = true;
-    _cameraController!.startImageStream((CameraImage image) {
-      // Throttle OCR frames to ~300ms intervals to optimize CPU/NPU on loaner iQOO phone
-      final now = DateTime.now();
-      if (now.difference(_lastFrameTime).inMilliseconds < 350) return;
-      _lastFrameTime = now;
+    if (!kIsWeb && _cameraController!.value.isInitialized) {
+      _isCameraStreaming = true;
+      _cameraController!.startImageStream((CameraImage image) {
+        // Throttle OCR frames to ~300ms intervals to optimize CPU/NPU on loaner iQOO phone
+        final now = DateTime.now();
+        if (now.difference(_lastFrameTime).inMilliseconds < 350) return;
+        _lastFrameTime = now;
 
-      _processCameraFrame(image);
-    });
+        _processCameraFrame(image);
+      });
+    } else {
+      debugPrint("Web platform detected: Image streaming bypassed for web preview.");
+    }
   }
 
   Future<void> _processCameraFrame(CameraImage image) async {
@@ -137,8 +142,11 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
     final inputImageFormat = InputImageFormatValue.fromRawValue(image.format.raw) ??
         InputImageFormat.nv21;
 
-    // Use first plane byte buffer
-    final bytes = image.planes.isNotEmpty ? image.planes[0].bytes : Uint8List(0);
+    final allBytes = WriteBuffer();
+    for (final Plane plane in image.planes) {
+      allBytes.putUint8List(plane.bytes);
+    }
+    final bytes = allBytes.done().buffer.asUint8List();
 
     return InputImage.fromBytes(
       bytes: bytes,
@@ -152,12 +160,68 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
   }
 
   void _loadMockTerminalPayload() {
-    final sampleText = OcrService.sampleKeyErrorTerminalOutput();
+    _injectDemoChallenge('keyerror');
+  }
+
+  void _injectDemoChallenge(String key) {
+    String sampleText;
+    String voicePrompt;
+    String name;
+
+    switch (key) {
+      case 'zerodiv':
+        sampleText = OcrService.sampleZeroDivisionTerminalOutput();
+        voicePrompt = 'Guard against zero denominator';
+        name = 'ZeroDivisionError (math_ops.py:18)';
+        break;
+      case 'typeerror':
+        sampleText = OcrService.sampleTypeErrorTerminalOutput();
+        voicePrompt = 'Add optional chaining and null check';
+        name = 'TypeError (UserList.tsx:42)';
+        break;
+      case 'indexerror':
+        sampleText = OcrService.sampleIndexErrorTerminalOutput();
+        voicePrompt = 'Add bounds check for index';
+        name = 'IndexError (cache.py:35)';
+        break;
+      case 'nullpointer':
+        sampleText = OcrService.sampleNullPointerTerminalOutput();
+        voicePrompt = 'Add null check before getProfile()';
+        name = 'NullPointerException (UserService.java:55)';
+        break;
+      case 'keyerror':
+      default:
+        sampleText = OcrService.sampleKeyErrorTerminalOutput();
+        voicePrompt = "Fix missing 'role' key with fallback to 'user'";
+        name = 'KeyError "role" (app.py:2)';
+        break;
+    }
+
     final payload = _ocrService.parseRawTextString(sampleText);
     setState(() {
       _currentPayload = payload;
-      _currentVoiceCommand = "Fix missing 'role' key with fallback to 'user'";
+      _currentVoiceCommand = voicePrompt;
     });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.auto_fix_high, color: Color(0xFF10B981), size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Injected: $name',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFF18181B),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _triggerAnalysis() async {
@@ -168,16 +232,50 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
     });
 
     try {
-      // Ensure we have a payload to analyze
-      var payloadToAnalyze = _currentPayload;
-      if (payloadToAnalyze.rawText.isEmpty) {
-        _loadMockTerminalPayload();
-        payloadToAnalyze = _currentPayload;
+      OcrAnalysisPayload payloadToAnalyze = _currentPayload;
+
+      // If camera is initialized, capture a razor-sharp snapshot to guarantee full OCR accuracy
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        try {
+          if (_isCameraStreaming) {
+            await _cameraController!.stopImageStream();
+            _isCameraStreaming = false;
+          }
+          final xfile = await _cameraController!.takePicture();
+          final inputImage = InputImage.fromFilePath(xfile.path);
+          final snapshotPayload = await _ocrService.processImage(inputImage);
+          if (snapshotPayload.rawText.trim().isNotEmpty) {
+            payloadToAnalyze = snapshotPayload;
+            _currentPayload = snapshotPayload;
+          }
+        } catch (e) {
+          debugPrint('Snapshot capture error: $e');
+        } finally {
+          _startCameraStream();
+        }
       }
 
-      final result = await _diagnosticService.analyze(
-        ocrPayload: payloadToAnalyze,
-        voiceCommand: _currentVoiceCommand,
+      // If no text was detected, notify user directly without silent fallback
+      if (payloadToAnalyze.rawText.trim().isEmpty) {
+        if (mounted) {
+          setState(() {
+            _isAnalyzing = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No terminal text detected. Please aim camera at the error log and tap again.'),
+              backgroundColor: Color(0xFFEF4444),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+
+      final result = await _diagnosticService.analyzeError(
+        scannedText: payloadToAnalyze.rawText,
+        userCommand: _currentVoiceCommand,
       );
 
       if (mounted) {
@@ -185,12 +283,20 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
           _isAnalyzing = false;
         });
 
-        // Navigate to Patch Inspector Screen
-        Navigator.of(context).push(
+        // Navigate to Patch Inspector Screen and await return
+        await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) => PatchInspectorScreen(diagnosticResult: result),
           ),
         );
+
+        // Clear scanned buffer and voice state upon returning so user can scan a new error immediately
+        if (mounted) {
+          setState(() {
+            _currentPayload = const OcrAnalysisPayload(rawText: '', boxes: []);
+            _currentVoiceCommand = '';
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -204,11 +310,322 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
     }
   }
 
+  void _showPasteLogModal() {
+    final logController = TextEditingController();
+    final commandController = TextEditingController(text: _currentVoiceCommand);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (modalContext) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.85,
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              top: 20,
+              left: 20,
+              right: 20,
+            ),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFCFCFB),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Modal Handle Bar
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE7E7E4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Modal Header
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3F2EF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE7E7E4)),
+                      ),
+                      child: const Icon(Icons.code, color: Color(0xFF111111), size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Paste & Solve Error Log',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                              color: Color(0xFF111111),
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Paste any terminal stack trace to analyze & patch',
+                            style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Quick Paste from Clipboard
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final data = await Clipboard.getData('text/plain');
+                        if (data != null && data.text != null) {
+                          setModalState(() {
+                            logController.text = data.text!;
+                          });
+                        }
+                      },
+                      icon: const Icon(Icons.content_paste, size: 14, color: Color(0xFF111111)),
+                      label: const Text('Paste', style: TextStyle(color: Color(0xFF111111), fontSize: 12, fontWeight: FontWeight.w700)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFFE7E7E4)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 14),
+
+                // Quick Sample Presets
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ActionChip(
+                        backgroundColor: const Color(0xFFF3F2EF),
+                        side: const BorderSide(color: Color(0xFFE7E7E4)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
+                        label: const Text('ZeroDivisionError', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF111111))),
+                        onPressed: () {
+                          setModalState(() {
+                            logController.text = '''Traceback (most recent call last):
+  File "math_ops.py", line 18, in calculate_ratio
+    return numerator / denominator
+ZeroDivisionError: division by zero''';
+                            commandController.text = 'Guard against zero denominator';
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      ActionChip(
+                        backgroundColor: const Color(0xFFF3F2EF),
+                        side: const BorderSide(color: Color(0xFFE7E7E4)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
+                        label: const Text('TypeError (React/TS)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF111111))),
+                        onPressed: () {
+                          setModalState(() {
+                            logController.text = '''TypeError: Cannot read properties of undefined (reading 'map')
+    at renderUserList (src/components/UserList.tsx:42:15)''';
+                            commandController.text = 'Add optional chaining and null check';
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      ActionChip(
+                        backgroundColor: const Color(0xFFF3F2EF),
+                        side: const BorderSide(color: Color(0xFFE7E7E4)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
+                        label: const Text("KeyError 'role'", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF111111))),
+                        onPressed: () {
+                          setModalState(() {
+                            logController.text = '''Traceback (most recent call last):
+  File "app.py", line 2, in process_user_data
+    return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
+KeyError: 'role' ''';
+                            commandController.text = 'Fix missing role key with fallback default';
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      ActionChip(
+                        backgroundColor: const Color(0xFFF3F2EF),
+                        side: const BorderSide(color: Color(0xFFE7E7E4)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
+                        label: const Text('IndexError', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF111111))),
+                        onPressed: () {
+                          setModalState(() {
+                            logController.text = '''Traceback (most recent call last):
+  File "cache.py", line 35, in get_item
+    return items[idx]
+IndexError: list index out of range''';
+                            commandController.text = 'Add bounds check for index';
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // Multi-line Terminal Text Field
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF18181B),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF27272A)),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: TextField(
+                      controller: logController,
+                      maxLines: null,
+                      expands: true,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        color: Color(0xFFF4F4F5),
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                      decoration: const InputDecoration(
+                        hintText: 'Paste stack trace or terminal error logs here...',
+                        hintStyle: TextStyle(color: Color(0xFF71717A), fontFamily: 'monospace', fontSize: 12),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // Voice / Custom Developer Command Input
+                TextField(
+                  controller: commandController,
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.mic_none, color: Color(0xFF111111), size: 18),
+                    hintText: 'Optional instructions (e.g. "Add fallback check")',
+                    hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF868381)),
+                    filled: true,
+                    fillColor: const Color(0xFFF3F2EF),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFFE7E7E4)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFFE7E7E4)),
+                    ),
+                  ),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                ),
+
+                const SizedBox(height: 14),
+
+                // Primary Submit CTA
+                ElevatedButton(
+                  onPressed: () async {
+                    final text = logController.text.trim();
+                    if (text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please paste or enter error log text first'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                      return;
+                    }
+
+                    final nav = Navigator.of(context);
+                    final messenger = ScaffoldMessenger.of(context);
+
+                    Navigator.pop(modalContext);
+
+                    setState(() {
+                      _isAnalyzing = true;
+                    });
+
+                    try {
+                      final customCmd = commandController.text.trim();
+                      final result = await _diagnosticService.analyzeError(
+                        scannedText: text,
+                        userCommand: customCmd.isNotEmpty ? customCmd : null,
+                      );
+
+                      if (mounted) {
+                        setState(() {
+                          _isAnalyzing = false;
+                        });
+
+                        await nav.push(
+                          MaterialPageRoute(
+                            builder: (context) => PatchInspectorScreen(diagnosticResult: result),
+                          ),
+                        );
+
+                        if (mounted) {
+                          setState(() {
+                            _currentPayload = const OcrAnalysisPayload(rawText: '', boxes: []);
+                            _currentVoiceCommand = '';
+                          });
+                        }
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        setState(() {
+                          _isAnalyzing = false;
+                        });
+                        messenger.showSnackBar(
+                          SnackBar(content: Text('Analysis failed: $e'), backgroundColor: Colors.red),
+                        );
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF111111),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: const StadiumBorder(),
+                    elevation: 0,
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.bolt, size: 18, color: Colors.white),
+                      SizedBox(width: 8),
+                      Text(
+                        'ANALYZE & GENERATE FIX',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, letterSpacing: -0.2),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_cameraController == null || !_cameraController!.value.isInitialized) return;
     if (state == AppLifecycleState.inactive) {
-      _cameraController?.dispose();
+      if (mounted) {
+        _cameraController?.dispose();
+        _cameraController = null;
+      }
     } else if (state == AppLifecycleState.resumed) {
       _initCamera();
     }
@@ -217,7 +634,10 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _cameraController?.dispose();
+    if (mounted) {
+      _cameraController?.dispose();
+      _cameraController = null;
+    }
     _ocrService.dispose();
     _voiceService.dispose();
     super.dispose();
@@ -226,48 +646,39 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: const Color(0xFFF7F7F5),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: const Color(0xFFF7F7F5),
         elevation: 0,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0284C7).withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF0284C7).withOpacity(0.4)),
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'PatchPilot',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.6,
+                  color: Color(0xFF111111),
+                ),
               ),
-              child: const Icon(Icons.psychology_outlined, color: Color(0xFF38BDF8), size: 20),
-            ),
-            const SizedBox(width: 10),
-            const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'PATCHPILOT',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                    color: Color(0xFFF8FAFC),
-                  ),
+              Text(
+                'Developer Diagnostic Copilot',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF6B6B6B),
+                  letterSpacing: -0.2,
                 ),
-                Text(
-                  'Vision & Voice Copilot',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    color: Color(0xFF94A3B8),
-                  ),
-                ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
         actions: [
-          // Backend Model Selector Chip
+          // Auralis Pill Chip Backend Model Selector
           PopupMenuButton<InferenceBackend>(
             initialValue: _diagnosticService.activeBackend,
             onSelected: (backend) {
@@ -275,23 +686,46 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                 _diagnosticService.activeBackend = backend;
               });
             },
-            color: const Color(0xFF1E293B),
+            color: const Color(0xFFFCFCFB),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: Color(0xFF334155)),
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xFFE7E7E4)),
             ),
             child: Container(
               margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF0EA5E9).withOpacity(0.4)),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(9999),
+                border: Border.all(color: const Color(0xFFE7E7E4)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.bolt, color: Color(0xFF38BDF8), size: 14),
-                  const SizedBox(width: 4),
+                  // Pulsing emerald live status dot
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF10B981),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0xFF10B981),
+                          blurRadius: 4,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 7),
                   Text(
                     _diagnosticService.activeBackend == InferenceBackend.onDeviceGemma2B
                         ? 'Gemma-2B (NPU)'
@@ -299,84 +733,173 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                             ? 'Phi-3 (NPU)'
                             : 'Groq Cloud',
                     style: const TextStyle(
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFFE2E8F0),
+                      color: Color(0xFF111111),
+                      letterSpacing: -0.2,
                     ),
                   ),
-                  const Icon(Icons.arrow_drop_down, color: Color(0xFF94A3B8), size: 16),
+                  const SizedBox(width: 2),
+                  const Icon(Icons.keyboard_arrow_down, color: Color(0xFF6B6B6B), size: 16),
                 ],
               ),
             ),
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: InferenceBackend.onDeviceGemma2B,
-                child: Text('⚡ Gemma-2B (On-Device SLM)', style: TextStyle(color: Colors.white, fontSize: 13)),
+                child: Text('⚡ Gemma-2B (On-Device SLM)', style: TextStyle(color: Color(0xFF111111), fontSize: 13, fontWeight: FontWeight.w600)),
               ),
               const PopupMenuItem(
                 value: InferenceBackend.onDevicePhi3Mini,
-                child: Text('⚡ Phi-3 Mini (On-Device SLM)', style: TextStyle(color: Colors.white, fontSize: 13)),
+                child: Text('⚡ Phi-3 Mini (On-Device SLM)', style: TextStyle(color: Color(0xFF111111), fontSize: 13, fontWeight: FontWeight.w600)),
               ),
               const PopupMenuItem(
                 value: InferenceBackend.cloudGroqLlama3,
-                child: Text('☁️ Groq Llama-3 (Cloud Fallback)', style: TextStyle(color: Colors.white, fontSize: 13)),
+                child: Text('☁️ Groq Llama-3 (Cloud Fallback)', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 13)),
               ),
             ],
           ),
 
-          // Preset Demo Injector
-          IconButton(
-            icon: const Icon(Icons.auto_fix_high, color: Color(0xFFF59E0B)),
-            tooltip: 'Inject Hackathon Demo Frame',
-            onPressed: () {
-              _loadMockTerminalPayload();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Injected KeyError Challenge Stack Trace & Voice Prompt'),
-                  duration: Duration(seconds: 2),
+          // Paste Log & Solve Button
+          Container(
+            margin: const EdgeInsets.only(right: 6, top: 10, bottom: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFFE7E7E4)),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.content_paste_go, color: Color(0xFF111111), size: 18),
+              tooltip: 'Paste & Solve Error Log',
+              onPressed: _showPasteLogModal,
+            ),
+          ),
+
+          // Demo Injector Popup Menu Button
+          Container(
+            margin: const EdgeInsets.only(right: 12, top: 10, bottom: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFFE7E7E4)),
+            ),
+            child: PopupMenuButton<String>(
+              icon: const Icon(Icons.auto_fix_high, color: Color(0xFF111111), size: 18),
+              tooltip: 'Inject Demo Challenge',
+              color: const Color(0xFFFCFCFB),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: Color(0xFFE7E7E4)),
+              ),
+              onSelected: (key) {
+                _injectDemoChallenge(key);
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'keyerror',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('🐍 KeyError: "role"', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
+                      Text('app.py:2 (Python Missing Dict Key)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                    ],
+                  ),
                 ),
-              );
-            },
+                const PopupMenuItem(
+                  value: 'zerodiv',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('➗ ZeroDivisionError', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
+                      Text('math_ops.py:18 (Division by Zero)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'typeerror',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('⚛️ TypeError (Undefined Map)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
+                      Text('UserList.tsx:42 (React / TypeScript)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'indexerror',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('📦 IndexError: Out of Range', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
+                      Text('cache.py:35 (List Bounds Violation)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'nullpointer',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('☕ NullPointerException', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
+                      Text('UserService.java:55 (Java Null Reference)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
       body: Stack(
         children: [
-          // 1. Camera Viewfinder or Simulated Code Canvas
+          // 1. Camera Viewfinder or Auralis-style Gradient Aura Viewfinder
           Positioned.fill(
-            child: _isCameraInitialized && _cameraController != null
-                ? CameraPreview(
-                    _cameraController!,
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return CustomPaint(
-                          size: Size(constraints.maxWidth, constraints.maxHeight),
-                          painter: OcrOverlayPainter(
-                            boxes: _currentPayload.boxes,
-                            previewSize: _cameraController!.value.previewSize ??
-                                Size(constraints.maxWidth, constraints.maxHeight),
-                            widgetSize: Size(constraints.maxWidth, constraints.maxHeight),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F2EF),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: const Color(0xFFE7E7E4), width: 1.2),
+                  ),
+                  child: _isCameraInitialized && _cameraController != null
+                      ? CameraPreview(
+                          _cameraController!,
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              return CustomPaint(
+                                size: Size(constraints.maxWidth, constraints.maxHeight),
+                                painter: OcrOverlayPainter(
+                                  boxes: _currentPayload.boxes,
+                                  previewSize: _cameraController!.value.previewSize ??
+                                      Size(constraints.maxWidth, constraints.maxHeight),
+                                  widgetSize: Size(constraints.maxWidth, constraints.maxHeight),
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      },
-                    ),
-                  )
-                : _buildSimulatedViewfinder(),
+                        )
+                      : _buildAuralisHeroViewfinder(),
+                ),
+              ),
+            ),
           ),
 
-          // 2. Real-time Status Overlay HUD
+          // 2. Real-time Status Overlay HUD (Top)
           Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
+            top: 24,
+            left: 32,
+            right: 32,
             child: _buildHudStatusPills(),
           ),
 
-          // 3. Bottom Controls Panel
+          // 3. Bottom Glassmorphism Controls Dock
           Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
+            bottom: 16,
+            left: 16,
+            right: 16,
             child: _buildBottomControlPanel(),
           ),
         ],
@@ -384,109 +907,352 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildSimulatedViewfinder() {
-    return Container(
-      color: const Color(0xFF0F172A),
-      padding: const EdgeInsets.all(20),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF020617),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF334155)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+  /// Auralis-style clean aesthetic hero canvas with glowing multi-color aura mesh
+  Widget _buildAuralisHeroViewfinder() {
+    return Stack(
+      children: [
+        // Background Ceramic Panel
+        Container(
+          color: const Color(0xFFF3F2EF),
+        ),
+
+        // Glowing Multi-color Aura Mesh (Rose, Indigo, Purple, Teal, Sky Blue)
+        Center(
+          child: Stack(
+            alignment: Alignment.center,
             children: [
-              Row(
-                children: [
-                  Container(width: 10, height: 10, decoration: const BoxDecoration(color: Color(0xFFEF4444), shape: BoxShape.circle)),
-                  const SizedBox(width: 6),
-                  Container(width: 10, height: 10, decoration: const BoxDecoration(color: Color(0xFFF59E0B), shape: BoxShape.circle)),
-                  const SizedBox(width: 6),
-                  Container(width: 10, height: 10, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'iQOO Loaner Device - Terminal Viewfinder',
-                    style: TextStyle(color: Color(0xFF64748B), fontSize: 11, fontFamily: 'monospace'),
+              Transform.translate(
+                offset: const Offset(-60, -30),
+                child: Container(
+                  width: 220,
+                  height: 220,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [Color(0xFFF43F5E), Colors.transparent],
+                    ),
                   ),
-                ],
+                ),
               ),
-              const Divider(color: Color(0xFF1E293B), height: 20),
-              Text(
-                _currentPayload.rawText.isNotEmpty
-                    ? _currentPayload.rawText
-                    : OcrService.sampleKeyErrorTerminalOutput(),
-                style: const TextStyle(
-                  color: Color(0xFFF1F5F9),
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  height: 1.4,
+              Transform.translate(
+                offset: const Offset(30, -20),
+                child: Container(
+                  width: 240,
+                  height: 240,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [Color(0xFF6366F1), Colors.transparent],
+                    ),
+                  ),
+                ),
+              ),
+              Transform.translate(
+                offset: const Offset(-20, 50),
+                child: Container(
+                  width: 200,
+                  height: 200,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [Color(0xFF14B8A6), Colors.transparent],
+                    ),
+                  ),
+                ),
+              ),
+              Transform.translate(
+                offset: const Offset(70, 30),
+                child: Container(
+                  width: 200,
+                  height: 200,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [Color(0xFF38BDF8), Colors.transparent],
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
         ),
+
+        // Blur Filter to turn orbs into soft aura mesh
+        Positioned.fill(
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 45, sigmaY: 45),
+            child: Container(color: Colors.white.withValues(alpha: 0.25)),
+          ),
+        ),
+
+        // Central Glassmorphic Widget Container (Matching Auralis screenshot)
+        Center(
+          child: SingleChildScrollView(
+            child: Container(
+              width: 380,
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 36,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Widget Header: Identifier & Status Pill
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'NEURAL ENGINE V4.2 PRO',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.2,
+                                color: Color(0xFF6B6B6B),
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'On-Device SLM Viewfinder',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF111111),
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(9999),
+                          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.25)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.lens, color: Color(0xFF10B981), size: 7),
+                            SizedBox(width: 5),
+                            Text(
+                              'STUDIO MODE',
+                              style: TextStyle(
+                                color: Color(0xFF047857),
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Spectral Visualizer Bars
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      _buildWaveformBar(24, const Color(0xFF3B82F6)),
+                      _buildWaveformBar(38, const Color(0xFF3B82F6)),
+                      _buildWaveformBar(62, const Color(0xFF6366F1)),
+                      _buildWaveformBar(52, const Color(0xFF6366F1)),
+                      _buildWaveformBar(80, const Color(0xFF8B5CF6)),
+                      _buildWaveformBar(92, const Color(0xFFA855F7)),
+                      _buildWaveformBar(68, const Color(0xFF8B5CF6)),
+                      _buildWaveformBar(44, const Color(0xFF3B82F6)),
+                      _buildWaveformBar(58, const Color(0xFF3B82F6)),
+                      _buildWaveformBar(30, const Color(0xFF06B6D4)),
+                      _buildWaveformBar(48, const Color(0xFF14B8A6)),
+                      _buildWaveformBar(20, const Color(0xFF14B8A6)),
+                      _buildWaveformBar(34, const Color(0xFF06B6D4)),
+                      _buildWaveformBar(16, const Color(0xFF3B82F6)),
+                    ],
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // Metrics Grid: Latency, Confidence, Target File
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7F7F5).withValues(alpha: 0.8),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE7E7E4)),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('LATENCY', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                            SizedBox(height: 2),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.baseline,
+                              textBaseline: TextBaseline.alphabetic,
+                              children: [
+                                Text('24', style: TextStyle(color: Color(0xFF111111), fontSize: 18, fontWeight: FontWeight.w800)),
+                                SizedBox(width: 2),
+                                Text('ms', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 11, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('CONFIDENCE', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                            SizedBox(height: 2),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.baseline,
+                              textBaseline: TextBaseline.alphabetic,
+                              children: [
+                                Text('99.8', style: TextStyle(color: Color(0xFF111111), fontSize: 18, fontWeight: FontWeight.w800)),
+                                SizedBox(width: 2),
+                                Text('%', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 11, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('TARGET', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                            SizedBox(height: 2),
+                            Text('role.py:42', style: TextStyle(color: Color(0xFF111111), fontSize: 13, fontFamily: 'monospace', fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Code / Terminal Output snippet
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF18181B),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      _currentPayload.rawText.isNotEmpty
+                          ? _currentPayload.rawText
+                          : OcrService.sampleKeyErrorTerminalOutput(),
+                      style: const TextStyle(
+                        color: Color(0xFFF4F4F5),
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        height: 1.35,
+                      ),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWaveformBar(double height, Color color) {
+    return Container(
+      width: 5,
+      height: height * 0.7,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(9999),
       ),
     );
   }
 
   Widget _buildHudStatusPills() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
         if (_currentPayload.hasError)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: const Color(0xFFEF4444).withOpacity(0.85),
-              borderRadius: BorderRadius.circular(20),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(9999),
+              border: Border.all(color: const Color(0xFFEF4444)),
               boxShadow: [
-                BoxShadow(color: const Color(0xFFEF4444).withOpacity(0.4), blurRadius: 8),
+                BoxShadow(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
               ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline, color: Colors.white, size: 16),
+                const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 14),
                 const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    _currentPayload.detectedErrorType ?? 'Error Line Detected',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                Text(
+                  _currentPayload.detectedErrorType ?? 'Error Detected',
+                  style: const TextStyle(
+                    color: Color(0xFFEF4444),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11.5,
+                    letterSpacing: -0.2,
                   ),
                 ),
               ],
             ),
           ),
+        if (_currentPayload.hasError && _currentPayload.detectedTargetFile != null)
+          const SizedBox(width: 8),
         if (_currentPayload.detectedTargetFile != null)
           Container(
-            margin: const EdgeInsets.only(top: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A).withOpacity(0.9),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.5)),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(9999),
+              border: Border.all(color: const Color(0xFFE7E7E4)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 8,
+                ),
+              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.insert_drive_file_outlined, color: Color(0xFF38BDF8), size: 14),
+                const Icon(Icons.insert_drive_file_outlined, color: Color(0xFF111111), size: 14),
                 const SizedBox(width: 6),
                 Text(
                   '${_currentPayload.detectedTargetFile}${_currentPayload.detectedLineNumber != null ? ':${_currentPayload.detectedLineNumber}' : ''}',
                   style: const TextStyle(
-                    color: Color(0xFFE0F2FE),
-                    fontSize: 11,
+                    color: Color(0xFF111111),
+                    fontSize: 11.5,
                     fontFamily: 'monospace',
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
@@ -497,158 +1263,181 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
   }
 
   Widget _buildBottomControlPanel() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A).withOpacity(0.95),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
-        border: const Border(
-          top: BorderSide(color: Color(0xFF1E293B), width: 1.5),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Voice Command Transcript Bubble
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _voiceService.isListening
-                    ? const Color(0xFFEF4444)
-                    : const Color(0xFF334155),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  _voiceService.isListening ? Icons.graphic_eq : Icons.record_voice_over,
-                  color: _voiceService.isListening ? const Color(0xFFEF4444) : const Color(0xFF38BDF8),
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _currentVoiceCommand.isNotEmpty
-                        ? _currentVoiceCommand
-                        : (_voiceService.isListening ? 'Listening...' : 'Tap mic or speak command...'),
-                    style: TextStyle(
-                      color: _currentVoiceCommand.isNotEmpty
-                          ? const Color(0xFFF1F5F9)
-                          : const Color(0xFF64748B),
-                      fontSize: 13,
-                      fontStyle: _currentVoiceCommand.isEmpty ? FontStyle.italic : FontStyle.normal,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Preset Voice Chips for quick touch access
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: VoiceService.presetCommands.map((preset) {
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ActionChip(
-                    backgroundColor: const Color(0xFF1E293B),
-                    side: const BorderSide(color: Color(0xFF334155)),
-                    label: Text(
-                      preset,
-                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
-                    ),
-                    onPressed: () {
-                      _voiceService.setManualCommand(preset);
-                      setState(() {
-                        _currentVoiceCommand = preset;
-                      });
-                    },
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Action Row: Pulse Mic Button + Analyze CTA
-          Row(
-            children: [
-              PulseMicButton(
-                isListening: _voiceService.isListening,
-                onTap: () {
-                  if (_voiceService.isListening) {
-                    _voiceService.stopListening();
-                  } else {
-                    _voiceService.startListening(
-                      onResult: (transcript) {
-                        setState(() {
-                          _currentVoiceCommand = transcript;
-                        });
-                      },
-                    );
-                  }
-                  setState(() {});
-                },
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _isAnalyzing ? null : _triggerAnalysis,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0284C7),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    elevation: 4,
-                  ),
-                  child: _isAnalyzing
-                      ? const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            ),
-                            SizedBox(width: 10),
-                            Text('RUNNING SLM INFERENCE...'),
-                          ],
-                        )
-                      : const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.bolt, size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              'ANALYZE & GENERATE PATCH',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13.5,
-                                letterSpacing: 0.8,
-                              ),
-                            ),
-                          ],
-                        ),
-                ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.88),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: const Color(0xFFE7E7E4), width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 28,
+                offset: const Offset(0, 10),
               ),
             ],
           ),
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Voice Command Transcript Bubble
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7F7F5),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _voiceService.isListening
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFE7E7E4),
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _voiceService.isListening ? Icons.graphic_eq : Icons.record_voice_over,
+                      color: _voiceService.isListening ? const Color(0xFF10B981) : const Color(0xFF111111),
+                      size: 18,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _currentVoiceCommand.isNotEmpty
+                            ? _currentVoiceCommand
+                            : (_voiceService.isListening ? 'Listening for developer command...' : 'Tap mic or speak instructions...'),
+                        style: TextStyle(
+                          color: _currentVoiceCommand.isNotEmpty
+                              ? const Color(0xFF111111)
+                              : const Color(0xFF6B6B6B),
+                          fontSize: 13,
+                          fontWeight: _currentVoiceCommand.isNotEmpty ? FontWeight.w600 : FontWeight.normal,
+                          letterSpacing: -0.2,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // Preset Voice Chips
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: VoiceService.presetCommands.map((preset) {
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ActionChip(
+                        backgroundColor: const Color(0xFFF7F7F5),
+                        side: const BorderSide(color: Color(0xFFE7E7E4)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        label: Text(
+                          preset,
+                          style: const TextStyle(
+                            color: Color(0xFF111111),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        onPressed: () {
+                          _voiceService.setManualCommand(preset);
+                          setState(() {
+                            _currentVoiceCommand = preset;
+                          });
+                        },
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // Action Row: Pulse Mic Button + Primary Black Pill Button CTA
+              Row(
+                children: [
+                  PulseMicButton(
+                    isListening: _voiceService.isListening,
+                    onTap: () {
+                      if (_voiceService.isListening) {
+                        _voiceService.stopListening();
+                      } else {
+                        _voiceService.startListening(
+                          onResult: (transcript) {
+                            setState(() {
+                              _currentVoiceCommand = transcript;
+                            });
+                          },
+                        );
+                      }
+                      setState(() {});
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _isAnalyzing ? null : _triggerAnalysis,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF111111),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: const StadiumBorder(),
+                        elevation: 0,
+                      ),
+                      child: _isAnalyzing
+                          ? const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                ),
+                                SizedBox(width: 10),
+                                Text(
+                                  'GENERATING FIX...',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.bolt, size: 18, color: Colors.white),
+                                SizedBox(width: 6),
+                                Text(
+                                  'ANALYZE & GENERATE PATCH',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13.5,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
+

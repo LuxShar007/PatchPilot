@@ -68,7 +68,7 @@ class _PulseMicButtonState extends State<PulseMicButton> with SingleTickerProvid
                 height: widget.size * _pulseAnimation.value,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFFEF4444).withOpacity(0.35 / _pulseAnimation.value),
+                  color: const Color(0xFF10B981).withValues(alpha: 0.25 / _pulseAnimation.value),
                 ),
               ),
             GestureDetector(
@@ -78,26 +78,29 @@ class _PulseMicButtonState extends State<PulseMicButton> with SingleTickerProvid
                 height: widget.size,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: widget.isListening
-                        ? [const Color(0xFFEF4444), const Color(0xFFDC2626)]
-                        : [const Color(0xFF0284C7), const Color(0xFF0369A1)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  color: widget.isListening ? const Color(0xFF111111) : Colors.white,
+                  border: Border.all(
+                    color: widget.isListening ? const Color(0xFF10B981) : const Color(0xFFE7E7E4),
+                    width: 1.5,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: (widget.isListening ? const Color(0xFFEF4444) : const Color(0xFF0284C7))
-                          .withOpacity(0.5),
-                      blurRadius: 12,
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 14,
                       offset: const Offset(0, 4),
                     ),
+                    if (widget.isListening)
+                      BoxShadow(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.4),
+                        blurRadius: 16,
+                        spreadRadius: 2,
+                      ),
                   ],
                 ),
                 child: Icon(
                   widget.isListening ? Icons.mic : Icons.mic_none,
-                  color: Colors.white,
-                  size: widget.size * 0.45,
+                  color: widget.isListening ? const Color(0xFF10B981) : const Color(0xFF111111),
+                  size: widget.size * 0.46,
                 ),
               ),
             ),

@@ -201,13 +201,40 @@ class OcrService {
     );
   }
 
-  /// Sample mock terminal frame representing the hackathon challenge prompt
+  /// Sample mock terminal frames for hackathon challenge demos
   static String sampleKeyErrorTerminalOutput() {
-    return '''
-Traceback (most recent call last):
+    return '''Traceback (most recent call last):
   File "app.py", line 2, in process_user_data
     return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
 KeyError: 'role'
+''';
+  }
+
+  static String sampleZeroDivisionTerminalOutput() {
+    return '''Traceback (most recent call last):
+  File "math_ops.py", line 18, in calculate_ratio
+    return numerator / denominator
+ZeroDivisionError: division by zero
+''';
+  }
+
+  static String sampleTypeErrorTerminalOutput() {
+    return '''TypeError: Cannot read properties of undefined (reading 'map')
+    at renderUserList (src/components/UserList.tsx:42:15)
+''';
+  }
+
+  static String sampleIndexErrorTerminalOutput() {
+    return '''Traceback (most recent call last):
+  File "cache.py", line 35, in get_item
+    return items[idx]
+IndexError: list index out of range
+''';
+  }
+
+  static String sampleNullPointerTerminalOutput() {
+    return '''Exception in thread "main" java.lang.NullPointerException
+    at com.example.service.UserService.getProfile(UserService.java:55)
 ''';
   }
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Animated microphone button with glowing ripple pulses when actively listening
+/// Animated microphone button with glowing multi-ripple pulses when actively listening
 class PulseMicButton extends StatefulWidget {
   final bool isListening;
   final VoidCallback onTap;
@@ -20,20 +20,29 @@ class PulseMicButton extends StatefulWidget {
 class _PulseMicButtonState extends State<PulseMicButton> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _pulseAnimation;
+  late Animation<double> _secondaryPulseAnimation;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 1200),
     );
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.35).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.45).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutQuad),
+    );
+
+    _secondaryPulseAnimation = Tween<double>(begin: 1.0, end: 1.7).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.2, 1.0, curve: Curves.easeOutQuad),
+      ),
     );
 
     if (widget.isListening) {
-      _controller.repeat(reverse: true);
+      _controller.repeat(reverse: false);
     }
   }
 
@@ -41,7 +50,7 @@ class _PulseMicButtonState extends State<PulseMicButton> with SingleTickerProvid
   void didUpdateWidget(covariant PulseMicButton oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.isListening && !_controller.isAnimating) {
-      _controller.repeat(reverse: true);
+      _controller.repeat(reverse: false);
     } else if (!widget.isListening && _controller.isAnimating) {
       _controller.stop();
       _controller.reset();
@@ -57,31 +66,50 @@ class _PulseMicButtonState extends State<PulseMicButton> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _pulseAnimation,
+      animation: _controller,
       builder: (context, child) {
+        final progress = _controller.value;
+        final alpha1 = (1.0 - progress).clamp(0.0, 1.0) * 0.35;
+        final alpha2 = (1.0 - progress).clamp(0.0, 1.0) * 0.2;
+
         return Stack(
           alignment: Alignment.center,
           children: [
+            // Outer secondary ripple ring
+            if (widget.isListening)
+              Container(
+                width: widget.size * _secondaryPulseAnimation.value,
+                height: widget.size * _secondaryPulseAnimation.value,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF10B981).withValues(alpha: alpha2),
+                ),
+              ),
+
+            // Inner primary ripple ring
             if (widget.isListening)
               Container(
                 width: widget.size * _pulseAnimation.value,
                 height: widget.size * _pulseAnimation.value,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: const Color(0xFF10B981).withValues(alpha: 0.25 / _pulseAnimation.value),
+                  color: const Color(0xFF10B981).withValues(alpha: alpha1),
                 ),
               ),
+
+            // Center Interactive Mic Button
             GestureDetector(
               onTap: widget.onTap,
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
                 width: widget.size,
                 height: widget.size,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: widget.isListening ? const Color(0xFF111111) : Colors.white,
+                  color: widget.isListening ? const Color(0xFF09090B) : Colors.white,
                   border: Border.all(
                     color: widget.isListening ? const Color(0xFF10B981) : const Color(0xFFE7E7E4),
-                    width: 1.5,
+                    width: widget.isListening ? 2.0 : 1.5,
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -91,8 +119,8 @@ class _PulseMicButtonState extends State<PulseMicButton> with SingleTickerProvid
                     ),
                     if (widget.isListening)
                       BoxShadow(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.4),
-                        blurRadius: 16,
+                        color: const Color(0xFF10B981).withValues(alpha: 0.45),
+                        blurRadius: 18,
                         spreadRadius: 2,
                       ),
                   ],

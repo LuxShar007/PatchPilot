@@ -6,8 +6,7 @@ def process_user_data(user_dict: dict) -> dict:
 
     Baseline BUG: Direct indexing causes KeyError when 'role' is missing in user_dict.
     """
-    role = user_dict.get('role', 'user')
-    return {'name': user_dict['name'], 'role': role.upper(), 'status': 'active'}
+    return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
 
 
 def get_user_role(user: dict) -> str:

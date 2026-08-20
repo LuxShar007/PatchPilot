@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-/// Represents the strict JSON output contract produced by PatchPilot's diagnostic inference pipeline.
+/// Represents the strict JSON output contract produced by RecTrace's diagnostic inference pipeline.
 class DiagnosticResult {
   final String rootCause;
   final String targetFile;

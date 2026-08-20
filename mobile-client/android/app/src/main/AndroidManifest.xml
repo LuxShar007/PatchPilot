@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Permissions required for PatchPilot Core Functionality -->
+    <!-- Permissions required for RecTrace Core Functionality -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -9,7 +9,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:label="PatchPilot"
+        android:label="RecTrace"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

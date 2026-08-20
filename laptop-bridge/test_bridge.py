@@ -1,4 +1,4 @@
-"""End-to-end verification script for PatchPilot Laptop Bridge & Testbed."""
+"""End-to-end verification script for RecTrace Laptop Bridge & Testbed."""
 
 import json
 import os
@@ -96,8 +96,8 @@ def setup_mock_project_git_repo():
 
     if not git_dir.exists():
         run_cmd([git_bin, "init"], cwd=MOCK_PROJECT_DIR)
-        run_cmd([git_bin, "config", "user.email", "patchpilot@iqoo.hackathon"], cwd=MOCK_PROJECT_DIR)
-        run_cmd([git_bin, "config", "user.name", "PatchPilot Testbed"], cwd=MOCK_PROJECT_DIR)
+        run_cmd([git_bin, "config", "user.email", "rectrace@iqoo.hackathon"], cwd=MOCK_PROJECT_DIR)
+        run_cmd([git_bin, "config", "user.name", "RecTrace Testbed"], cwd=MOCK_PROJECT_DIR)
     else:
         # Reset any working tree modifications
         run_cmd([git_bin, "reset", "--hard", "HEAD"], cwd=MOCK_PROJECT_DIR, check=False)
@@ -167,7 +167,7 @@ def test_end_to_end_bridge():
             pass
 
     # 4. Start daemon in background subprocess
-    print("\n[3/6] Starting PatchPilot daemon on port 8000...")
+    print("\n[3/6] Starting RecTrace daemon on port 8000...")
     daemon_proc = subprocess.Popen(
         [sys.executable, str(BASE_DIR / "daemon.py")],
         stdout=subprocess.PIPE,
@@ -194,7 +194,7 @@ def test_end_to_end_bridge():
                 f"Daemon failed to start within timeout.\nStdout: {daemon_stdout}\nStderr: {daemon_stderr}"
             )
 
-        print("[✓] PatchPilot Daemon & FastAPI status endpoint live!")
+        print("[✓] RecTrace Daemon & FastAPI status endpoint live!")
 
         # 5. Drop patch into inbox_patches/
         print("\n[4/6] Generating and dropping patch into inbox_patches/...")
@@ -235,7 +235,38 @@ def test_end_to_end_bridge():
         pytest_res = run_cmd([sys.executable, "-m", "pytest", str(MOCK_PROJECT_DIR)], check=True)
         assert pytest_res.returncode == 0
         assert "passed" in pytest_res.stdout
-        print("[✓] Verified: All pytest tests in mock_project are PASSING.")
+        # 8. Verification of /create-branch-commit and /git-info
+        print("\n[*] Verifying /create-branch-commit and /git-info...")
+        branch_res = requests.post(
+            "http://127.0.0.1:8000/create-branch-commit",
+            json={"branch_name": "rectrace/test-branch", "commit_message": "test: verify automated branch creation"},
+            timeout=3,
+        )
+        assert branch_res.status_code == 200
+        branch_data = branch_res.json()
+        assert branch_data["status"] == "success"
+        assert branch_data["branch"] == "rectrace/test-branch"
+        assert branch_data["commit_sha"] is not None
+
+        git_info_res = requests.get("http://127.0.0.1:8000/git-info", timeout=2)
+        assert git_info_res.status_code == 200
+        assert git_info_res.json()["current_branch"] == "rectrace/test-branch"
+        print(f"[✓] Created Git branch {branch_data['branch']} (Commit: {branch_data['commit_sha']})")
+
+        # 9. Verification of /reset-testbed and /run-tests endpoints
+        print("\n[*] Verifying /reset-testbed and /run-tests endpoints...")
+        reset_res = requests.post("http://127.0.0.1:8000/reset-testbed", timeout=2)
+        assert reset_res.status_code == 200
+        assert reset_res.json()["status"] == "baseline_reset"
+
+        run_res = requests.post("http://127.0.0.1:8000/run-tests", timeout=2)
+        assert run_res.status_code == 200
+        assert run_res.json()["status"] == "FAILED"  # Baseline fails with KeyError
+
+        health_res = requests.get("http://127.0.0.1:8000/health", timeout=2)
+        assert health_res.status_code == 200
+        assert health_res.json()["status"] == "healthy"
+        print("[✓] Verified: /create-branch-commit, /git-info, /reset-testbed, /run-tests, and /health work as expected.")
 
         print("\n" + "=" * 70)
         print("ALL VERIFICATION CHECKS PASSED SUCCESSFULLY! [✓]")

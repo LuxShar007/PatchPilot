@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'screens/scanner_screen.dart';
+import 'screens/studio_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,16 +15,16 @@ void main() async {
     ),
   );
 
-  runApp(const PatchPilotApp());
+  runApp(const RecTraceApp());
 }
 
-class PatchPilotApp extends StatelessWidget {
-  const PatchPilotApp({super.key});
+class RecTraceApp extends StatelessWidget {
+  const RecTraceApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'PatchPilot',
+      title: 'RecTrace',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.light,
       theme: ThemeData(
@@ -62,7 +62,7 @@ class PatchPilotApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const ScannerScreen(),
+      home: const StudioScreen(),
     );
   }
 }

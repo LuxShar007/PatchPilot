@@ -1,7 +1,7 @@
-# PatchPilot - Mobile Client (Module A)
-### Phone-First Developer Diagnostic Copilot (iQOO Hackathon)
+# RecTrace - Mobile Client (Module A)
+### Cross-Device Code & Error Precision Fixing Studio (iQOO Hackathon)
 
-The **PatchPilot Mobile Client** is an on-device diagnostic copilot engineered for the loaner iQOO phone. It pairs computer vision (real-time OCR) with hands-free developer speech recognition and Small Language Model (SLM) prompt formatting to inspect terminal stack traces and emit production-grade git patches.
+The **RecTrace Mobile Client** is an on-device diagnostic studio engineered for the loaner iQOO phone. It pairs dual-deck error & code editing, computer vision (real-time OCR), developer voice commands, and Small Language Model (SLM) prompt formatting to inspect terminal stack traces and emit production-grade git patches.
 
 ---
 
@@ -19,6 +19,7 @@ mobile-client/
 │   │   ├── diagnostic_result.dart     # Strict JSON Contract data model & serialization
 │   │   └── ocr_box.dart               # ML Kit OCR bounding boxes & error metadata
 │   ├── screens/
+│   │   ├── studio_screen.dart         # Primary dual-deck fixing studio with laptop workspace sync
 │   │   ├── scanner_screen.dart        # Camera viewfinder with OCR overlay & pulsing mic button
 │   │   └── patch_inspector_screen.dart# Unified diff viewer, root cause summary, Copy Diff & Push to Bridge
 │   ├── services/
@@ -38,7 +39,7 @@ mobile-client/
 
 ## ⚡ Output Contract (Strict JSON Integration)
 
-When **"Analyze & Generate Patch"** is tapped or voice is processed, `DiagnosticService` produces the exact contract required by PatchPilot:
+When **"Analyze & Generate Patch"** is tapped or voice is processed, `DiagnosticService` produces the exact contract required by RecTrace:
 
 ```json
 {

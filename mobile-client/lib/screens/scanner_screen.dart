@@ -8,6 +8,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/ocr_box.dart';
+import '../services/bridge_service.dart';
 import '../services/diagnostic_service.dart';
 import '../services/ocr_service.dart';
 import '../services/voice_service.dart';
@@ -22,7 +23,8 @@ class ScannerScreen extends StatefulWidget {
   State<ScannerScreen> createState() => _ScannerScreenState();
 }
 
-class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserver {
+class _ScannerScreenState extends State<ScannerScreen>
+    with WidgetsBindingObserver {
   CameraController? _cameraController;
   List<CameraDescription> _cameras = [];
   bool _isCameraInitialized = false;
@@ -31,11 +33,14 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
   final VoiceService _voiceService = VoiceService();
   final DiagnosticService _diagnosticService = DiagnosticService();
 
-  OcrAnalysisPayload _currentPayload = const OcrAnalysisPayload(rawText: '', boxes: []);
+  OcrAnalysisPayload _currentPayload =
+      const OcrAnalysisPayload(rawText: '', boxes: []);
   String _currentVoiceCommand = '';
   bool _isAnalyzing = false;
   bool _isCameraStreaming = false;
   DateTime _lastFrameTime = DateTime.now();
+  BridgePingResult? _bridgePing;
+  bool _isCheckingBridge = false;
 
   @override
   void initState() {
@@ -57,6 +62,21 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         });
       }
     };
+
+    // 3. Ping Laptop Bridge Daemon
+    _checkBridgeHealth();
+  }
+
+  Future<void> _checkBridgeHealth() async {
+    if (_isCheckingBridge) return;
+    setState(() => _isCheckingBridge = true);
+    final ping = await BridgeService.checkHealth();
+    if (mounted) {
+      setState(() {
+        _bridgePing = ping;
+        _isCheckingBridge = false;
+      });
+    }
   }
 
   Future<void> _initCamera() async {
@@ -86,17 +106,21 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
           _startCameraStream();
         }
       } else {
-        debugPrint('No cameras available, enabling mock terminal viewfinder mode.');
+        debugPrint(
+            'No cameras available, enabling mock terminal viewfinder mode.');
         _loadMockTerminalPayload();
       }
     } catch (e) {
-      debugPrint('Camera initialization failed: $e. Falling back to simulated viewfinder.');
+      debugPrint(
+          'Camera initialization failed: $e. Falling back to simulated viewfinder.');
       _loadMockTerminalPayload();
     }
   }
 
   void _startCameraStream() {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
     if (_isCameraStreaming) return;
 
     if (!kIsWeb && _cameraController!.value.isInitialized) {
@@ -110,7 +134,8 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         _processCameraFrame(image);
       });
     } else {
-      debugPrint("Web platform detected: Image streaming bypassed for web preview.");
+      debugPrint(
+          "Web platform detected: Image streaming bypassed for web preview.");
     }
   }
 
@@ -136,11 +161,13 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
     if (_cameraController == null) return null;
     final camera = _cameraController!.description;
 
-    final imageRotation = InputImageRotationValue.fromRawValue(camera.sensorOrientation) ??
-        InputImageRotation.rotation0deg;
+    final imageRotation =
+        InputImageRotationValue.fromRawValue(camera.sensorOrientation) ??
+            InputImageRotation.rotation0deg;
 
-    final inputImageFormat = InputImageFormatValue.fromRawValue(image.format.raw) ??
-        InputImageFormat.nv21;
+    final inputImageFormat =
+        InputImageFormatValue.fromRawValue(image.format.raw) ??
+            InputImageFormat.nv21;
 
     final allBytes = WriteBuffer();
     for (final Plane plane in image.planes) {
@@ -154,7 +181,8 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         size: Size(image.width.toDouble(), image.height.toDouble()),
         rotation: imageRotation,
         format: inputImageFormat,
-        bytesPerRow: image.planes.isNotEmpty ? image.planes[0].bytesPerRow : image.width,
+        bytesPerRow:
+            image.planes.isNotEmpty ? image.planes[0].bytesPerRow : image.width,
       ),
     );
   }
@@ -263,7 +291,8 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('No terminal text detected. Please aim camera at the error log and tap again.'),
+              content: Text(
+                  'No terminal text detected. Please aim camera at the error log and tap again.'),
               backgroundColor: Color(0xFFEF4444),
               behavior: SnackBarBehavior.floating,
               duration: Duration(seconds: 3),
@@ -286,7 +315,8 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
         // Navigate to Patch Inspector Screen and await return
         await Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (context) => PatchInspectorScreen(diagnosticResult: result),
+            builder: (context) =>
+                PatchInspectorScreen(diagnosticResult: result),
           ),
         );
 
@@ -304,7 +334,9 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
           _isAnalyzing = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Analysis failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Analysis failed: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -358,7 +390,8 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: const Color(0xFFE7E7E4)),
                       ),
-                      child: const Icon(Icons.code, color: Color(0xFF111111), size: 20),
+                      child: const Icon(Icons.code,
+                          color: Color(0xFF111111), size: 20),
                     ),
                     const SizedBox(width: 12),
                     const Expanded(
@@ -377,7 +410,8 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                           SizedBox(height: 2),
                           Text(
                             'Paste any terminal stack trace to analyze & patch',
-                            style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B)),
+                            style: TextStyle(
+                                fontSize: 12, color: Color(0xFF6B6B6B)),
                           ),
                         ],
                       ),
@@ -392,12 +426,19 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                           });
                         }
                       },
-                      icon: const Icon(Icons.content_paste, size: 14, color: Color(0xFF111111)),
-                      label: const Text('Paste', style: TextStyle(color: Color(0xFF111111), fontSize: 12, fontWeight: FontWeight.w700)),
+                      icon: const Icon(Icons.content_paste,
+                          size: 14, color: Color(0xFF111111)),
+                      label: const Text('Paste',
+                          style: TextStyle(
+                              color: Color(0xFF111111),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700)),
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: Color(0xFFE7E7E4)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
                       ),
                     ),
                   ],
@@ -413,15 +454,22 @@ class _ScannerScreenState extends State<ScannerScreen> with WidgetsBindingObserv
                       ActionChip(
                         backgroundColor: const Color(0xFFF3F2EF),
                         side: const BorderSide(color: Color(0xFFE7E7E4)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
-                        label: const Text('ZeroDivisionError', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF111111))),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9999)),
+                        label: const Text('ZeroDivisionError',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF111111))),
                         onPressed: () {
                           setModalState(() {
-                            logController.text = '''Traceback (most recent call last):
+                            logController.text =
+                                '''Traceback (most recent call last):
   File "math_ops.py", line 18, in calculate_ratio
     return numerator / denominator
 ZeroDivisionError: division by zero''';
-                            commandController.text = 'Guard against zero denominator';
+                            commandController.text =
+                                'Guard against zero denominator';
                           });
                         },
                       ),
@@ -429,13 +477,20 @@ ZeroDivisionError: division by zero''';
                       ActionChip(
                         backgroundColor: const Color(0xFFF3F2EF),
                         side: const BorderSide(color: Color(0xFFE7E7E4)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
-                        label: const Text('TypeError (React/TS)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF111111))),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9999)),
+                        label: const Text('TypeError (React/TS)',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF111111))),
                         onPressed: () {
                           setModalState(() {
-                            logController.text = '''TypeError: Cannot read properties of undefined (reading 'map')
+                            logController.text =
+                                '''TypeError: Cannot read properties of undefined (reading 'map')
     at renderUserList (src/components/UserList.tsx:42:15)''';
-                            commandController.text = 'Add optional chaining and null check';
+                            commandController.text =
+                                'Add optional chaining and null check';
                           });
                         },
                       ),
@@ -443,15 +498,22 @@ ZeroDivisionError: division by zero''';
                       ActionChip(
                         backgroundColor: const Color(0xFFF3F2EF),
                         side: const BorderSide(color: Color(0xFFE7E7E4)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
-                        label: const Text("KeyError 'role'", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF111111))),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9999)),
+                        label: const Text("KeyError 'role'",
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF111111))),
                         onPressed: () {
                           setModalState(() {
-                            logController.text = '''Traceback (most recent call last):
+                            logController.text =
+                                '''Traceback (most recent call last):
   File "app.py", line 2, in process_user_data
     return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
 KeyError: 'role' ''';
-                            commandController.text = 'Fix missing role key with fallback default';
+                            commandController.text =
+                                'Fix missing role key with fallback default';
                           });
                         },
                       ),
@@ -459,15 +521,22 @@ KeyError: 'role' ''';
                       ActionChip(
                         backgroundColor: const Color(0xFFF3F2EF),
                         side: const BorderSide(color: Color(0xFFE7E7E4)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
-                        label: const Text('IndexError', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF111111))),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9999)),
+                        label: const Text('IndexError',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF111111))),
                         onPressed: () {
                           setModalState(() {
-                            logController.text = '''Traceback (most recent call last):
+                            logController.text =
+                                '''Traceback (most recent call last):
   File "cache.py", line 35, in get_item
     return items[idx]
 IndexError: list index out of range''';
-                            commandController.text = 'Add bounds check for index';
+                            commandController.text =
+                                'Add bounds check for index';
                           });
                         },
                       ),
@@ -497,8 +566,12 @@ IndexError: list index out of range''';
                         height: 1.4,
                       ),
                       decoration: const InputDecoration(
-                        hintText: 'Paste stack trace or terminal error logs here...',
-                        hintStyle: TextStyle(color: Color(0xFF71717A), fontFamily: 'monospace', fontSize: 12),
+                        hintText:
+                            'Paste stack trace or terminal error logs here...',
+                        hintStyle: TextStyle(
+                            color: Color(0xFF71717A),
+                            fontFamily: 'monospace',
+                            fontSize: 12),
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.zero,
                       ),
@@ -512,12 +585,16 @@ IndexError: list index out of range''';
                 TextField(
                   controller: commandController,
                   decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.mic_none, color: Color(0xFF111111), size: 18),
-                    hintText: 'Optional instructions (e.g. "Add fallback check")',
-                    hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF868381)),
+                    prefixIcon: const Icon(Icons.mic_none,
+                        color: Color(0xFF111111), size: 18),
+                    hintText:
+                        'Optional instructions (e.g. "Add fallback check")',
+                    hintStyle: const TextStyle(
+                        fontSize: 12.5, color: Color(0xFF868381)),
                     filled: true,
                     fillColor: const Color(0xFFF3F2EF),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),
                       borderSide: const BorderSide(color: Color(0xFFE7E7E4)),
@@ -527,7 +604,8 @@ IndexError: list index out of range''';
                       borderSide: const BorderSide(color: Color(0xFFE7E7E4)),
                     ),
                   ),
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500),
                 ),
 
                 const SizedBox(height: 14),
@@ -539,7 +617,8 @@ IndexError: list index out of range''';
                     if (text.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Please paste or enter error log text first'),
+                          content: Text(
+                              'Please paste or enter error log text first'),
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
@@ -569,13 +648,15 @@ IndexError: list index out of range''';
 
                         await nav.push(
                           MaterialPageRoute(
-                            builder: (context) => PatchInspectorScreen(diagnosticResult: result),
+                            builder: (context) =>
+                                PatchInspectorScreen(diagnosticResult: result),
                           ),
                         );
 
                         if (mounted) {
                           setState(() {
-                            _currentPayload = const OcrAnalysisPayload(rawText: '', boxes: []);
+                            _currentPayload = const OcrAnalysisPayload(
+                                rawText: '', boxes: []);
                             _currentVoiceCommand = '';
                           });
                         }
@@ -586,7 +667,9 @@ IndexError: list index out of range''';
                           _isAnalyzing = false;
                         });
                         messenger.showSnackBar(
-                          SnackBar(content: Text('Analysis failed: $e'), backgroundColor: Colors.red),
+                          SnackBar(
+                              content: Text('Analysis failed: $e'),
+                              backgroundColor: Colors.red),
                         );
                       }
                     }
@@ -605,7 +688,10 @@ IndexError: list index out of range''';
                       SizedBox(width: 8),
                       Text(
                         'ANALYZE & GENERATE FIX',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, letterSpacing: -0.2),
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13.5,
+                            letterSpacing: -0.2),
                       ),
                     ],
                   ),
@@ -618,9 +704,295 @@ IndexError: list index out of range''';
     );
   }
 
+  void _showBridgeQuickPanel() {
+    final ipController =
+        TextEditingController(text: BridgeService.activeLaptopIp);
+    bool isResetting = false;
+    bool isTesting = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (modalContext) => StatefulBuilder(
+        builder: (context, setPanelState) {
+          final isOnline = _bridgePing?.isOnline ?? false;
+
+          return Container(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              top: 20,
+              left: 20,
+              right: 20,
+            ),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFCFCFB),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE7E7E4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: (isOnline
+                                ? const Color(0xFF10B981)
+                                : const Color(0xFFEF4444))
+                            .withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        isOnline
+                            ? Icons.wifi_tethering
+                            : Icons.wifi_tethering_off,
+                        color: isOnline
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFFEF4444),
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Laptop Bridge Live Control',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                              color: Color(0xFF111111),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            isOnline
+                                ? 'Connected: ${BridgeService.activeLaptopIp}:8000 (${_bridgePing?.latencyMs}ms)'
+                                : 'Offline / Unreachable (${BridgeService.activeLaptopIp}:8000)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isOnline
+                                  ? const Color(0xFF10B981)
+                                  : const Color(0xFFEF4444),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.refresh,
+                          color: Color(0xFF111111), size: 20),
+                      tooltip: 'Ping now',
+                      onPressed: () async {
+                        await _checkBridgeHealth();
+                        setPanelState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // Quick Host Presets
+                const Text(
+                  'Quick Host Presets:',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF6B6B6B)),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    ActionChip(
+                      label: const Text('10.0.2.2 (Emulator)',
+                          style: TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w600)),
+                      backgroundColor: const Color(0xFFF3F2EF),
+                      side: const BorderSide(color: Color(0xFFE7E7E4)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(9999)),
+                      onPressed: () async {
+                        ipController.text = '10.0.2.2';
+                        BridgeService.activeLaptopIp = '10.0.2.2';
+                        await _checkBridgeHealth();
+                        setPanelState(() {});
+                        setState(() {});
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    ActionChip(
+                      label: const Text('127.0.0.1 (Localhost)',
+                          style: TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w600)),
+                      backgroundColor: const Color(0xFFF3F2EF),
+                      side: const BorderSide(color: Color(0xFFE7E7E4)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(9999)),
+                      onPressed: () async {
+                        ipController.text = '127.0.0.1';
+                        BridgeService.activeLaptopIp = '127.0.0.1';
+                        await _checkBridgeHealth();
+                        setPanelState(() {});
+                        setState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                // IP Input Row
+                TextField(
+                  controller: ipController,
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.computer,
+                        size: 18, color: Color(0xFF111111)),
+                    hintText: 'Enter Laptop IP (e.g. 192.168.1.100)',
+                    filled: true,
+                    fillColor: const Color(0xFFF3F2EF),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFFE7E7E4)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFFE7E7E4)),
+                    ),
+                    suffixIcon: TextButton(
+                      onPressed: () async {
+                        final newIp = ipController.text.trim();
+                        if (newIp.isNotEmpty) {
+                          BridgeService.activeLaptopIp = newIp;
+                          await _checkBridgeHealth();
+                          setPanelState(() {});
+                          setState(() {});
+                        }
+                      },
+                      child: const Text('Connect',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF111111))),
+                    ),
+                  ),
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                // Remote Actions: Reset Testbed & Run CI Tests
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: isResetting
+                            ? null
+                            : () async {
+                                setPanelState(() => isResetting = true);
+                                final res =
+                                    await BridgeService.resetRemoteTestbed();
+                                setPanelState(() => isResetting = false);
+                                await _checkBridgeHealth();
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          res['message']?.toString() ??
+                                              'Testbed reset!'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                }
+                              },
+                        icon: isResetting
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.restore,
+                                size: 16, color: Color(0xFF111111)),
+                        label: const Text('Reset Testbed',
+                            style: TextStyle(
+                                color: Color(0xFF111111),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFFE7E7E4)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: isTesting
+                            ? null
+                            : () async {
+                                setPanelState(() => isTesting = true);
+                                final res =
+                                    await BridgeService.runRemoteTests();
+                                setPanelState(() => isTesting = false);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content:
+                                          Text('Test Run: ${res['status']}'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                }
+                              },
+                        icon: isTesting
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.play_arrow,
+                                size: 16, color: Color(0xFF111111)),
+                        label: const Text('Run Tests',
+                            style: TextStyle(
+                                color: Color(0xFF111111),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFFE7E7E4)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
     if (state == AppLifecycleState.inactive) {
       if (mounted) {
         _cameraController?.dispose();
@@ -645,6 +1017,8 @@ IndexError: list index out of range''';
 
   @override
   Widget build(BuildContext context) {
+    final isBridgeOnline = _bridgePing?.isOnline ?? false;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F5),
       appBar: AppBar(
@@ -657,7 +1031,7 @@ IndexError: list index out of range''';
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'PatchPilot',
+                'RecTrace',
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
@@ -678,6 +1052,55 @@ IndexError: list index out of range''';
           ),
         ),
         actions: [
+          // Live Bridge Ping Chip Button
+          GestureDetector(
+            onTap: _showBridgeQuickPanel,
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(9999),
+                border: Border.all(color: const Color(0xFFE7E7E4)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: isBridgeOnline
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFFEF4444),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    isBridgeOnline
+                        ? '${_bridgePing?.latencyMs}ms'
+                        : 'Bridge Offline',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: isBridgeOnline
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFFEF4444),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
           // Auralis Pill Chip Backend Model Selector
           PopupMenuButton<InferenceBackend>(
             initialValue: _diagnosticService.activeBackend,
@@ -692,8 +1115,8 @@ IndexError: list index out of range''';
               side: const BorderSide(color: Color(0xFFE7E7E4)),
             ),
             child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(9999),
@@ -727,49 +1150,62 @@ IndexError: list index out of range''';
                   ),
                   const SizedBox(width: 7),
                   Text(
-                    _diagnosticService.activeBackend == InferenceBackend.onDeviceGemma2B
-                        ? 'Gemma-2B (NPU)'
-                        : _diagnosticService.activeBackend == InferenceBackend.onDevicePhi3Mini
-                            ? 'Phi-3 (NPU)'
+                    _diagnosticService.activeBackend ==
+                            InferenceBackend.onDeviceGemma2B
+                        ? 'Gemma-2B'
+                        : _diagnosticService.activeBackend ==
+                                InferenceBackend.onDevicePhi3Mini
+                            ? 'Phi-3'
                             : 'Groq Cloud',
                     style: const TextStyle(
-                      fontSize: 12,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w600,
                       color: Color(0xFF111111),
                       letterSpacing: -0.2,
                     ),
                   ),
                   const SizedBox(width: 2),
-                  const Icon(Icons.keyboard_arrow_down, color: Color(0xFF6B6B6B), size: 16),
+                  const Icon(Icons.keyboard_arrow_down,
+                      color: Color(0xFF6B6B6B), size: 15),
                 ],
               ),
             ),
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: InferenceBackend.onDeviceGemma2B,
-                child: Text('⚡ Gemma-2B (On-Device SLM)', style: TextStyle(color: Color(0xFF111111), fontSize: 13, fontWeight: FontWeight.w600)),
+                child: Text('⚡ Gemma-2B (On-Device SLM)',
+                    style: TextStyle(
+                        color: Color(0xFF111111),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
               ),
               const PopupMenuItem(
                 value: InferenceBackend.onDevicePhi3Mini,
-                child: Text('⚡ Phi-3 Mini (On-Device SLM)', style: TextStyle(color: Color(0xFF111111), fontSize: 13, fontWeight: FontWeight.w600)),
+                child: Text('⚡ Phi-3 Mini (On-Device SLM)',
+                    style: TextStyle(
+                        color: Color(0xFF111111),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
               ),
               const PopupMenuItem(
                 value: InferenceBackend.cloudGroqLlama3,
-                child: Text('☁️ Groq Llama-3 (Cloud Fallback)', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 13)),
+                child: Text('☁️ Groq Llama-3 (Cloud Fallback)',
+                    style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 13)),
               ),
             ],
           ),
 
           // Paste Log & Solve Button
           Container(
-            margin: const EdgeInsets.only(right: 6, top: 10, bottom: 10),
+            margin: const EdgeInsets.only(right: 4, top: 10, bottom: 10),
             decoration: BoxDecoration(
               color: Colors.white,
               shape: BoxShape.circle,
               border: Border.all(color: const Color(0xFFE7E7E4)),
             ),
             child: IconButton(
-              icon: const Icon(Icons.content_paste_go, color: Color(0xFF111111), size: 18),
+              icon: const Icon(Icons.content_paste_go,
+                  color: Color(0xFF111111), size: 17),
               tooltip: 'Paste & Solve Error Log',
               onPressed: _showPasteLogModal,
             ),
@@ -784,7 +1220,8 @@ IndexError: list index out of range''';
               border: Border.all(color: const Color(0xFFE7E7E4)),
             ),
             child: PopupMenuButton<String>(
-              icon: const Icon(Icons.auto_fix_high, color: Color(0xFF111111), size: 18),
+              icon: const Icon(Icons.auto_fix_high,
+                  color: Color(0xFF111111), size: 18),
               tooltip: 'Inject Demo Challenge',
               color: const Color(0xFFFCFCFB),
               shape: RoundedRectangleBorder(
@@ -800,8 +1237,14 @@ IndexError: list index out of range''';
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('🐍 KeyError: "role"', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
-                      Text('app.py:2 (Python Missing Dict Key)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                      Text('🐍 KeyError: "role"',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: Color(0xFF111111))),
+                      Text('app.py:2 (Python Missing Dict Key)',
+                          style: TextStyle(
+                              fontSize: 11, color: Color(0xFF6B6B6B))),
                     ],
                   ),
                 ),
@@ -810,8 +1253,14 @@ IndexError: list index out of range''';
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('➗ ZeroDivisionError', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
-                      Text('math_ops.py:18 (Division by Zero)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                      Text('➗ ZeroDivisionError',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: Color(0xFF111111))),
+                      Text('math_ops.py:18 (Division by Zero)',
+                          style: TextStyle(
+                              fontSize: 11, color: Color(0xFF6B6B6B))),
                     ],
                   ),
                 ),
@@ -820,8 +1269,14 @@ IndexError: list index out of range''';
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('⚛️ TypeError (Undefined Map)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
-                      Text('UserList.tsx:42 (React / TypeScript)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                      Text('⚛️ TypeError (Undefined Map)',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: Color(0xFF111111))),
+                      Text('UserList.tsx:42 (React / TypeScript)',
+                          style: TextStyle(
+                              fontSize: 11, color: Color(0xFF6B6B6B))),
                     ],
                   ),
                 ),
@@ -830,8 +1285,14 @@ IndexError: list index out of range''';
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('📦 IndexError: Out of Range', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
-                      Text('cache.py:35 (List Bounds Violation)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                      Text('📦 IndexError: Out of Range',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: Color(0xFF111111))),
+                      Text('cache.py:35 (List Bounds Violation)',
+                          style: TextStyle(
+                              fontSize: 11, color: Color(0xFF6B6B6B))),
                     ],
                   ),
                 ),
@@ -840,8 +1301,14 @@ IndexError: list index out of range''';
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('☕ NullPointerException', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF111111))),
-                      Text('UserService.java:55 (Java Null Reference)', style: TextStyle(fontSize: 11, color: Color(0xFF6B6B6B))),
+                      Text('☕ NullPointerException',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: Color(0xFF111111))),
+                      Text('UserService.java:55 (Java Null Reference)',
+                          style: TextStyle(
+                              fontSize: 11, color: Color(0xFF6B6B6B))),
                     ],
                   ),
                 ),
@@ -862,7 +1329,8 @@ IndexError: list index out of range''';
                   decoration: BoxDecoration(
                     color: const Color(0xFFF3F2EF),
                     borderRadius: BorderRadius.circular(28),
-                    border: Border.all(color: const Color(0xFFE7E7E4), width: 1.2),
+                    border:
+                        Border.all(color: const Color(0xFFE7E7E4), width: 1.2),
                   ),
                   child: _isCameraInitialized && _cameraController != null
                       ? CameraPreview(
@@ -870,12 +1338,16 @@ IndexError: list index out of range''';
                           child: LayoutBuilder(
                             builder: (context, constraints) {
                               return CustomPaint(
-                                size: Size(constraints.maxWidth, constraints.maxHeight),
+                                size: Size(constraints.maxWidth,
+                                    constraints.maxHeight),
                                 painter: OcrOverlayPainter(
                                   boxes: _currentPayload.boxes,
-                                  previewSize: _cameraController!.value.previewSize ??
-                                      Size(constraints.maxWidth, constraints.maxHeight),
-                                  widgetSize: Size(constraints.maxWidth, constraints.maxHeight),
+                                  previewSize:
+                                      _cameraController!.value.previewSize ??
+                                          Size(constraints.maxWidth,
+                                              constraints.maxHeight),
+                                  widgetSize: Size(constraints.maxWidth,
+                                      constraints.maxHeight),
                                 ),
                               );
                             },
@@ -995,7 +1467,8 @@ IndexError: list index out of range''';
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.65),
                 borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 1.5),
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.8), width: 1.5),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.08),
@@ -1040,11 +1513,15 @@ IndexError: list index out of range''';
                       ),
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                          color:
+                              const Color(0xFF10B981).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(9999),
-                          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.25)),
+                          border: Border.all(
+                              color: const Color(0xFF10B981)
+                                  .withValues(alpha: 0.25)),
                         ),
                         child: const Row(
                           children: [
@@ -1105,15 +1582,28 @@ IndexError: list index out of range''';
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('LATENCY', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                            Text('LATENCY',
+                                style: TextStyle(
+                                    color: Color(0xFF6B6B6B),
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5)),
                             SizedBox(height: 2),
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.baseline,
                               textBaseline: TextBaseline.alphabetic,
                               children: [
-                                Text('24', style: TextStyle(color: Color(0xFF111111), fontSize: 18, fontWeight: FontWeight.w800)),
+                                Text('24',
+                                    style: TextStyle(
+                                        color: Color(0xFF111111),
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800)),
                                 SizedBox(width: 2),
-                                Text('ms', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 11, fontWeight: FontWeight.w600)),
+                                Text('ms',
+                                    style: TextStyle(
+                                        color: Color(0xFF6B6B6B),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ],
@@ -1121,15 +1611,28 @@ IndexError: list index out of range''';
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('CONFIDENCE', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                            Text('CONFIDENCE',
+                                style: TextStyle(
+                                    color: Color(0xFF6B6B6B),
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5)),
                             SizedBox(height: 2),
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.baseline,
                               textBaseline: TextBaseline.alphabetic,
                               children: [
-                                Text('99.8', style: TextStyle(color: Color(0xFF111111), fontSize: 18, fontWeight: FontWeight.w800)),
+                                Text('99.8',
+                                    style: TextStyle(
+                                        color: Color(0xFF111111),
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800)),
                                 SizedBox(width: 2),
-                                Text('%', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 11, fontWeight: FontWeight.w600)),
+                                Text('%',
+                                    style: TextStyle(
+                                        color: Color(0xFF6B6B6B),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ],
@@ -1137,9 +1640,19 @@ IndexError: list index out of range''';
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('TARGET', style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                            Text('TARGET',
+                                style: TextStyle(
+                                    color: Color(0xFF6B6B6B),
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5)),
                             SizedBox(height: 2),
-                            Text('role.py:42', style: TextStyle(color: Color(0xFF111111), fontSize: 13, fontFamily: 'monospace', fontWeight: FontWeight.w700)),
+                            Text('role.py:42',
+                                style: TextStyle(
+                                    color: Color(0xFF111111),
+                                    fontSize: 13,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.w700)),
                           ],
                         ),
                       ],
@@ -1211,7 +1724,8 @@ IndexError: list index out of range''';
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 14),
+                const Icon(Icons.error_outline,
+                    color: Color(0xFFEF4444), size: 14),
                 const SizedBox(width: 6),
                 Text(
                   _currentPayload.detectedErrorType ?? 'Error Detected',
@@ -1225,7 +1739,8 @@ IndexError: list index out of range''';
               ],
             ),
           ),
-        if (_currentPayload.hasError && _currentPayload.detectedTargetFile != null)
+        if (_currentPayload.hasError &&
+            _currentPayload.detectedTargetFile != null)
           const SizedBox(width: 8),
         if (_currentPayload.detectedTargetFile != null)
           Container(
@@ -1244,7 +1759,8 @@ IndexError: list index out of range''';
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.insert_drive_file_outlined, color: Color(0xFF111111), size: 14),
+                const Icon(Icons.insert_drive_file_outlined,
+                    color: Color(0xFF111111), size: 14),
                 const SizedBox(width: 6),
                 Text(
                   '${_currentPayload.detectedTargetFile}${_currentPayload.detectedLineNumber != null ? ':${_currentPayload.detectedLineNumber}' : ''}',
@@ -1286,7 +1802,8 @@ IndexError: list index out of range''';
             children: [
               // Voice Command Transcript Bubble
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF7F7F5),
                   borderRadius: BorderRadius.circular(16),
@@ -1300,8 +1817,12 @@ IndexError: list index out of range''';
                 child: Row(
                   children: [
                     Icon(
-                      _voiceService.isListening ? Icons.graphic_eq : Icons.record_voice_over,
-                      color: _voiceService.isListening ? const Color(0xFF10B981) : const Color(0xFF111111),
+                      _voiceService.isListening
+                          ? Icons.graphic_eq
+                          : Icons.record_voice_over,
+                      color: _voiceService.isListening
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFF111111),
                       size: 18,
                     ),
                     const SizedBox(width: 10),
@@ -1309,13 +1830,17 @@ IndexError: list index out of range''';
                       child: Text(
                         _currentVoiceCommand.isNotEmpty
                             ? _currentVoiceCommand
-                            : (_voiceService.isListening ? 'Listening for developer command...' : 'Tap mic or speak instructions...'),
+                            : (_voiceService.isListening
+                                ? 'Listening for developer command...'
+                                : 'Tap mic or speak instructions...'),
                         style: TextStyle(
                           color: _currentVoiceCommand.isNotEmpty
                               ? const Color(0xFF111111)
                               : const Color(0xFF6B6B6B),
                           fontSize: 13,
-                          fontWeight: _currentVoiceCommand.isNotEmpty ? FontWeight.w600 : FontWeight.normal,
+                          fontWeight: _currentVoiceCommand.isNotEmpty
+                              ? FontWeight.w600
+                              : FontWeight.normal,
                           letterSpacing: -0.2,
                         ),
                         maxLines: 2,
@@ -1338,8 +1863,10 @@ IndexError: list index out of range''';
                       child: ActionChip(
                         backgroundColor: const Color(0xFFF7F7F5),
                         side: const BorderSide(color: Color(0xFFE7E7E4)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9999)),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 2),
                         label: Text(
                           preset,
                           style: const TextStyle(
@@ -1401,7 +1928,8 @@ IndexError: list index out of range''';
                                 SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white),
                                 ),
                                 SizedBox(width: 10),
                                 Text(
@@ -1440,4 +1968,3 @@ IndexError: list index out of range''';
     );
   }
 }
-

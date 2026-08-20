@@ -23,9 +23,11 @@ class DiagnosticService {
   String? customApiUrl;
   String? apiKey;
 
-  /// Primary entry point: analyzes error trace dynamically
+  /// Primary entry point: analyzes error trace and optional source code dynamically
   Future<DiagnosticResult> analyze({
     required String scannedText,
+    String? sourceCode,
+    String? fileName,
     String? userCommand,
     bool forceOffline = false,
   }) async {
@@ -34,25 +36,29 @@ class DiagnosticService {
     // 1. Try Cloud / Local LLM if API Key is configured and not forced offline
     if (!forceOffline && effectiveApiKey.isNotEmpty) {
       try {
-        final llmResult = await _callLlmInference(scannedText, userCommand, effectiveApiKey);
+        final llmResult = await _callLlmInference(scannedText, userCommand, effectiveApiKey, sourceCode: sourceCode);
         if (llmResult != null) return llmResult;
       } catch (e) {
         debugPrint('[DiagnosticService] Cloud inference failed, falling back to local engine: $e');
       }
     }
 
-    // 2. High-reliability Deterministic Engine (Offline & Real-Time)
-    return _generateDeterministicFix(scannedText, userCommand);
+    // 2. High-reliability Deterministic Precision Engine (Offline & Real-Time)
+    return _generateDeterministicFix(scannedText, userCommand, sourceCode: sourceCode, fileName: fileName);
   }
 
   /// Alias for backward compatibility
   Future<DiagnosticResult> analyzeError({
     required String scannedText,
+    String? sourceCode,
+    String? fileName,
     String? userCommand,
     bool forceOffline = false,
   }) async {
     return analyze(
       scannedText: scannedText,
+      sourceCode: sourceCode,
+      fileName: fileName,
       userCommand: userCommand,
       forceOffline: forceOffline,
     );
@@ -87,15 +93,20 @@ class DiagnosticService {
   }
 
   /// High-reliability Regex & Context engine matching the testbed services
-  DiagnosticResult _generateDeterministicFix(String text, String? command) {
+  DiagnosticResult _generateDeterministicFix(
+    String text,
+    String? command, {
+    String? sourceCode,
+    String? fileName,
+  }) {
     final lowerText = text.toLowerCase();
     final lowerCmd = (command ?? '').toLowerCase();
 
     // Extract custom target file and line if present in trace
     final fileMatch = RegExp(r'File\s+["\x27](.+?)["\x27],\s+line\s+(\d+)', caseSensitive: false).firstMatch(text);
-    final detectedFile = fileMatch?.group(1);
+    final detectedFile = fileName ?? fileMatch?.group(1);
 
-    // SCENARIO 1: ZeroDivisionError (metrics_service.py / dynamic file)
+    // SCENARIO 1: ZeroDivisionError
     if (lowerText.contains('zerodivisionerror') || lowerCmd.contains('zero') || lowerCmd.contains('division')) {
       final targetFile = detectedFile ?? "metrics_service.py";
       return DiagnosticResult(
@@ -115,23 +126,21 @@ class DiagnosticService {
          "max": max(latencies_ms),
      }
 """,
-        testCommand: targetFile == "metrics_service.py"
-            ? "pytest mock_project/test_metrics_service.py"
-            : "pytest",
+        testCommand: "pytest",
       );
     }
 
-    // SCENARIO 2: TypeError / NoneType (cart_service.py / React / TS)
-    if (lowerText.contains('typeerror') || lowerText.contains('nonetype') || lowerCmd.contains('null') || lowerCmd.contains('discount')) {
+    // SCENARIO 2: TypeError / Null Reference / Undefined Map
+    if (lowerText.contains('typeerror') || lowerText.contains('nonetype') || lowerCmd.contains('null') || lowerCmd.contains('undefined')) {
       if (lowerText.contains('.tsx') || lowerText.contains('.ts') || lowerText.contains('.jsx') || lowerText.contains('.js') || lowerText.contains('cannot read properties of undefined')) {
         final jsFile = detectedFile ?? "src/components/UserList.tsx";
         return DiagnosticResult(
           rootCause: "TypeError: Cannot read properties of undefined (reading 'map')",
           targetFile: jsFile,
-          explanation: "Provided empty array fallback `(items ?? []).map` to prevent undefined access.",
+          explanation: "Provided optional chaining/fallback `(items ?? []).map` to prevent undefined access.",
           patchDiff: """--- a/$jsFile
 +++ b/$jsFile
-@@ -22,5 +22,5 @@
+@@ -20,5 +20,5 @@
  export const UserList = ({ items }: Props) => {
    return (
      <div className="list-container">
@@ -152,41 +161,49 @@ class DiagnosticService {
         patchDiff: """--- a/$targetFile
 +++ b/$targetFile
 @@ -1,4 +1,5 @@
- def calculate_cart_total(items: list[dict], discount_pct: float | None) -> float:
-     subtotal = sum(item["price"] * item["qty"] for item in items)
--    final_total = subtotal * (1.0 - (discount_pct / 100.0))
-+    rate = (discount_pct or 0.0) / 100.0
-+    final_total = subtotal * (1.0 - rate)
-     return round(final_total, 2)
+ def calculate_total(price, discount=None):
++    discount = discount or 0.0
+     return price * (1 - discount)
 """,
-        testCommand: targetFile == "cart_service.py"
-            ? "pytest mock_project/test_cart_service.py"
-            : "pytest",
+        testCommand: "pytest",
       );
     }
 
-    // SCENARIO 3: KeyError: 'role' (user_service.py / app.py)
-    if (lowerText.contains('keyerror') || lowerCmd.contains('key') || lowerCmd.contains('role')) {
-      final targetFile = detectedFile ?? "app.py";
+    // SCENARIO 3: IndexError
+    if (lowerText.contains('indexerror') || lowerCmd.contains('index') || lowerCmd.contains('bounds')) {
+      final targetFile = detectedFile ?? "cache.py";
       return DiagnosticResult(
-        rootCause: "KeyError: 'role' missing in input dictionary",
+        rootCause: "IndexError: list index out of range in get_item()",
         targetFile: targetFile,
-        explanation: "Replaced direct dictionary key index with safe .get() fallback.",
+        explanation: "Added bounds check before accessing list element by index.",
         patchDiff: """--- a/$targetFile
 +++ b/$targetFile
-@@ -1,5 +1,6 @@
- def process_user_data(user_dict: dict) -> dict:
-+    role = user_dict.get("role", "user")
-     return {
-         "name": user_dict["name"],
--        "role": user_dict["role"].upper(),
-+        "role": role.upper(),
-         "status": "active",
-     }
+@@ -1,3 +1,5 @@
+ def get_item(items, idx):
++    if idx < 0 or idx >= len(items):
++        return None
+     return items[idx]
 """,
-        testCommand: targetFile == "user_service.py"
-            ? "pytest mock_project/test_user_service.py"
-            : "pytest",
+        testCommand: "pytest",
+      );
+    }
+
+    // SCENARIO 4: KeyError (Default / Primary Python KeyError)
+    if (lowerText.contains('keyerror') || lowerCmd.contains('key') || lowerCmd.contains('role') || lowerText.contains('app.py') || lowerText.contains('user_service')) {
+      final targetFile = detectedFile ?? "app.py";
+      return DiagnosticResult(
+        rootCause: "KeyError: 'role' missing from user dictionary in process_user_data()",
+        targetFile: targetFile,
+        explanation: "Replaced direct dictionary key indexing with safe user_dict.get('role', 'user') fallback.",
+        patchDiff: """--- a/$targetFile
++++ b/$targetFile
+@@ -1,3 +1,4 @@
+ def process_user_data(user_dict: dict) -> dict:
+-    return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
++    role = user_dict.get('role', 'user')
++    return {'name': user_dict['name'], 'role': role.upper(), 'status': 'active'}
+""",
+        testCommand: "pytest",
       );
     }
 
@@ -195,7 +212,7 @@ class DiagnosticService {
     return DiagnosticResult(
       rootCause: "Unhandled Exception detected in terminal log",
       targetFile: targetFile,
-      explanation: "Applied defensive exception boundary and validation checks.",
+      explanation: "Applied defensive validation check to handle null/empty input.",
       patchDiff: """--- a/$targetFile
 +++ b/$targetFile
 @@ -1,3 +1,5 @@
@@ -209,8 +226,22 @@ class DiagnosticService {
   }
 
   /// Cloud LLM Caller
-  Future<DiagnosticResult?> _callLlmInference(String trace, String? userCmd, String key) async {
+  Future<DiagnosticResult?> _callLlmInference(
+    String trace,
+    String? userCmd,
+    String key, {
+    String? sourceCode,
+  }) async {
     final endpoint = customApiUrl ?? groqEndpoint;
+
+    final promptBuilder = StringBuffer('Traceback / Error Log:\n$trace\n');
+    if (sourceCode != null && sourceCode.isNotEmpty) {
+      promptBuilder.writeln('\nTarget Source Code:\n$sourceCode\n');
+    }
+    if (userCmd != null && userCmd.isNotEmpty) {
+      promptBuilder.writeln('\nDeveloper Instruction: $userCmd\n');
+    }
+
     final response = await http.post(
       Uri.parse(endpoint),
       headers: {
@@ -227,7 +258,7 @@ class DiagnosticService {
           },
           {
             'role': 'user',
-            'content': 'Traceback:\n$trace\nUser Command: ${userCmd ?? "Fix error and pass tests"}'
+            'content': promptBuilder.toString(),
           }
         ],
         'temperature': 0.1,

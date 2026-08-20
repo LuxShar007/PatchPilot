@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-/// Formatted interactive Diff Viewer for PatchPilot with colored unified diff rendering
+/// Formatted interactive Diff Viewer for RecTrace with colored unified diff rendering and copy actions
 class DiffViewer extends StatelessWidget {
   final String patchDiff;
   final String? fileName;
@@ -17,13 +18,13 @@ class DiffViewer extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF18181B), // Dark zinc IDE surface
+        color: const Color(0xFF121215), // Deep zinc dark surface
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFF27272A), width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 20,
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 24,
             offset: const Offset(0, 8),
           ),
         ],
@@ -33,9 +34,9 @@ class DiffViewer extends StatelessWidget {
         children: [
           // Minimalist Window Header Bar
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: const BoxDecoration(
-              color: Color(0xFF121215),
+              color: Color(0xFF09090B),
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(19),
                 topRight: Radius.circular(19),
@@ -46,7 +47,7 @@ class DiffViewer extends StatelessWidget {
             ),
             child: Row(
               children: [
-                // Three subtle window controls
+                // Three subtle macOS style window dots
                 Row(
                   children: [
                     Container(
@@ -93,6 +94,24 @@ class DiffViewer extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                // Quick Copy Diff button
+                IconButton(
+                  icon: const Icon(Icons.copy_rounded, color: Color(0xFFA1A1AA), size: 15),
+                  tooltip: 'Copy Diff Text',
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  padding: EdgeInsets.zero,
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: patchDiff));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Unified diff copied to clipboard!'),
+                        behavior: SnackBarBehavior.floating,
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(

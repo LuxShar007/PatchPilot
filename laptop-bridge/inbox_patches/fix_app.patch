@@ -1,0 +1,7 @@
+--- a/app.py
++++ b/app.py
+@@ -6,4 +6,5 @@
+ def process_user_data(user_dict: dict) -> dict:
++    role = user_dict.get('role', 'user')
+-    return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
++    return {'name': user_dict['name'], 'role': role.upper(), 'status': 'active'}

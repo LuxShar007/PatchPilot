@@ -5,3 +5,4 @@
 -    return {'name': user_dict['name'], 'role': user_dict['role'].upper(), 'status': 'active'}
 +    role = user_dict.get('role', 'user')
 +    return {'name': user_dict['name'], 'role': role.upper(), 'status': 'active'}
+

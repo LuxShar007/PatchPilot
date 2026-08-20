@@ -314,6 +314,7 @@ def reset_testbed_state() -> Dict[str, Any]:
 
     if git_dir.exists():
         try:
+            subprocess.run([git_bin, "-C", str(MOCK_PROJECT_DIR), "checkout", "-B", "main"], check=False, capture_output=True)
             subprocess.run([git_bin, "-C", str(MOCK_PROJECT_DIR), "reset", "--hard", "HEAD"], check=False, capture_output=True)
             subprocess.run([git_bin, "-C", str(MOCK_PROJECT_DIR), "clean", "-fd"], check=False, capture_output=True)
             app_file.write_text(BASELINE_APP_CODE, encoding="utf-8")
@@ -844,21 +845,13 @@ def create_git_branch_and_commit(
         commit_message = commit_message.strip()
 
     try:
-        # Check out a new branch
-        branch_res = subprocess.run(
-            [git_bin, "-C", str(MOCK_PROJECT_DIR), "checkout", "-b", branch_name],
+        # Check out or switch to the new branch
+        subprocess.run(
+            [git_bin, "-C", str(MOCK_PROJECT_DIR), "checkout", "-B", branch_name],
             capture_output=True,
             text=True,
             check=False,
         )
-        if branch_res.returncode != 0:
-            # If branch exists, switch to it
-            subprocess.run(
-                [git_bin, "-C", str(MOCK_PROJECT_DIR), "checkout", branch_name],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
 
         # Stage all modifications in mock_project
         subprocess.run(

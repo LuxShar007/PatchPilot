@@ -95,11 +95,12 @@ def setup_mock_project_git_repo():
     (MOCK_PROJECT_DIR / "app.py").write_text(BASELINE_APP_CODE, encoding="utf-8")
 
     if not git_dir.exists():
-        run_cmd([git_bin, "init"], cwd=MOCK_PROJECT_DIR)
+        run_cmd([git_bin, "init", "-b", "main"], cwd=MOCK_PROJECT_DIR, check=False)
         run_cmd([git_bin, "config", "user.email", "rectrace@iqoo.hackathon"], cwd=MOCK_PROJECT_DIR)
         run_cmd([git_bin, "config", "user.name", "RecTrace Testbed"], cwd=MOCK_PROJECT_DIR)
     else:
-        # Reset any working tree modifications
+        # Reset any working tree modifications and switch to main
+        run_cmd([git_bin, "checkout", "-B", "main"], cwd=MOCK_PROJECT_DIR, check=False)
         run_cmd([git_bin, "reset", "--hard", "HEAD"], cwd=MOCK_PROJECT_DIR, check=False)
         run_cmd([git_bin, "clean", "-fd"], cwd=MOCK_PROJECT_DIR, check=False)
         (MOCK_PROJECT_DIR / "app.py").write_text(BASELINE_APP_CODE, encoding="utf-8")

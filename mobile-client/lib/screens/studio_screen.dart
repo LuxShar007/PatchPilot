@@ -408,6 +408,31 @@ KeyError: 'role' ''';
           ),
         ),
         actions: [
+          // 1-Tap Quick Reset Testbed for Live Judging Demos
+          IconButton(
+            icon: const Icon(Icons.restore, color: Color(0xFF111111), size: 20),
+            tooltip: 'Reset Laptop Testbed to Baseline Bug',
+            onPressed: () async {
+              final res = await BridgeService.resetRemoteTestbed();
+              await _checkBridgeAndFetchFiles();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        const Icon(Icons.refresh, color: Color(0xFF10B981), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(res['message']?.toString() ?? 'Laptop testbed reset to baseline!')),
+                      ],
+                    ),
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          ),
+
           // Live Bridge Ping Chip Button
           GestureDetector(
             onTap: _showBridgeQuickPanel,
@@ -532,10 +557,76 @@ KeyError: 'role' ''';
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(18, 10, 18, 24),
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 🔴 Red Light Hackathon Context Banner
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111111),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF27272A)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.shield, color: Color(0xFFEF4444), size: 14),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'RED LIGHT MODE ACTIVE',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 11,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        Text(
+                          'Laptop closed · iQOO Mobile Remediation Studio connected via Office Kit',
+                          style: TextStyle(
+                            color: Color(0xFFA1A1AA),
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF27272A),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      '55% BUILD',
+                      style: TextStyle(color: Color(0xFFE4E4E7), fontSize: 9, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
             // 1. Deck 1: Error & Stack Trace Input Card
             Container(
               padding: const EdgeInsets.all(16),
@@ -567,19 +658,28 @@ KeyError: 'role' ''';
                         ),
                       ),
                       const Spacer(),
-                      // Quick Paste Button
+                      // Quick Paste from Office Kit Shared Clipboard Button
                       OutlinedButton.icon(
                         onPressed: () async {
                           final data = await Clipboard.getData('text/plain');
-                          if (data != null && data.text != null) {
+                          if (data != null && data.text != null && data.text!.isNotEmpty) {
                             setState(() => _logController.text = data.text!);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Pasted from Office Kit Shared Clipboard!'),
+                                  behavior: SnackBarBehavior.floating,
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            }
                           }
                         },
                         icon: const Icon(Icons.paste, size: 13, color: Color(0xFF111111)),
-                        label: const Text('Paste', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF111111))),
+                        label: const Text('Office Kit Paste', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF111111))),
                         style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: Color(0xFFE7E7E4)),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           minimumSize: const Size(0, 28),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),

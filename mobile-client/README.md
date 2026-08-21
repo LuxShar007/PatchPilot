@@ -13,7 +13,7 @@ mobile-client/
 ├── analysis_options.yaml              # Dart analyzer configuration
 ├── android/
 │   └── app/src/main/AndroidManifest.xml # Permissions (Camera, Audio, Storage, Internet)
-├── lib/
+├── lib/ 
 │   ├── main.dart                      # App entrypoint, Dark IDE Theme, navigation routing
 │   ├── models/
 │   │   ├── diagnostic_result.dart     # Strict JSON Contract data model & serialization

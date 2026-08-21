@@ -77,6 +77,67 @@ class _PatchInspectorScreenState extends State<PatchInspectorScreen> {
           duration: const Duration(seconds: 3),
         ),
       );
+  Future<void> _handleExportPatchFile() async {
+    final baseName = widget.diagnosticResult.targetFile.split('/').last.split('.').first;
+    final patchFileName = 'fix_${baseName.isNotEmpty ? baseName : 'bug'}.patch';
+
+    final res = await BridgeService.pushToLocalStorage(
+      widget.diagnosticResult.patchDiff,
+      filename: patchFileName,
+    );
+
+    if (mounted) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFFFCFCFB),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: const BorderSide(color: Color(0xFFE7E7E4)),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.folder_shared, color: Color(0xFF111111), size: 20),
+              SizedBox(width: 8),
+              Text('Office Kit File Drop', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: Color(0xFF111111))),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                res.success ? 'Exported $patchFileName successfully!' : 'File export failed: ${res.message}',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3F2EF),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE7E7E4)),
+                ),
+                child: Text(
+                  res.filePath,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Color(0xFF111111)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '💡 Tip: Drag and drop this .patch file in the Office Kit File Transfer window directly into inbox_patches/ on your laptop.',
+                style: TextStyle(fontSize: 11.5, color: Color(0xFF6B6B6B), height: 1.35),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Got it', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF111111))),
+            ),
+          ],
+        ),
+      );
     }
   }
 
@@ -927,39 +988,66 @@ class _PatchInspectorScreenState extends State<PatchInspectorScreen> {
 
             const SizedBox(height: 24),
 
-            // 5. Primary Action Buttons: "Copy Diff" & "Push via Office Kit"
-            Row(
+            // 5. Primary Action Buttons: "Copy Diff" (Clipboard), "File Drop" (Storage/Transfer), & "Push via Bridge" (HTTP/CI)
+            Column(
               children: [
-                // Action 1: Copy Diff (Direct System Clipboard -> Office Kit Sync)
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _isCopying ? null : _handleCopyDiff,
-                    icon: _isCopying
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF111111)),
-                          )
-                        : const Icon(Icons.copy, size: 18, color: Color(0xFF111111)),
-                    label: const Text(
-                      'COPY DIFF',
-                      style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.2, color: Color(0xFF111111)),
+                Row(
+                  children: [
+                    // Action 1: Copy Diff (Direct System Clipboard -> Office Kit Shared Clipboard)
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isCopying ? null : _handleCopyDiff,
+                        icon: _isCopying
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF111111)),
+                              )
+                            : const Icon(Icons.copy, size: 16, color: Color(0xFF111111)),
+                        label: const Text(
+                          'COPY DIFF',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, letterSpacing: -0.2, color: Color(0xFF111111)),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF111111),
+                          side: const BorderSide(color: Color(0xFFE7E7E4)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          elevation: 0,
+                        ),
+                      ),
                     ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF111111),
-                      side: const BorderSide(color: Color(0xFFE7E7E4)),
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: const StadiumBorder(),
-                      elevation: 0,
+
+                    const SizedBox(width: 10),
+
+                    // Action 2: Office Kit File Drop (Export .patch to storage for drag-and-drop)
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _handleExportPatchFile,
+                        icon: const Icon(Icons.folder_shared_outlined, size: 16, color: Color(0xFF111111)),
+                        label: const Text(
+                          'FILE DROP',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, letterSpacing: -0.2, color: Color(0xFF111111)),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFF3F2EF),
+                          foregroundColor: const Color(0xFF111111),
+                          side: const BorderSide(color: Color(0xFFE7E7E4)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          elevation: 0,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
 
-                const SizedBox(width: 12),
+                const SizedBox(height: 10),
 
-                // Action 2: Push via Office Kit (Direct Network HTTP Push + Shared Storage)
-                Expanded(
+                // Action 3: Push via Bridge (Direct Network HTTP Push + Automated CI)
+                SizedBox(
+                  width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: _isPushing ? null : _handlePushToBridge,
                     icon: _isPushing
@@ -968,16 +1056,16 @@ class _PatchInspectorScreenState extends State<PatchInspectorScreen> {
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                           )
-                        : const Icon(Icons.sync_alt, size: 18, color: Colors.white),
+                        : const Icon(Icons.bolt, size: 18, color: Colors.white),
                     label: const Text(
-                      'PUSH VIA BRIDGE',
-                      style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.2, color: Colors.white),
+                      '1-TAP PUSH TO BRIDGE & RUN CI',
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: -0.2, color: Colors.white),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF111111),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: const StadiumBorder(),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       elevation: 0,
                     ),
                   ),

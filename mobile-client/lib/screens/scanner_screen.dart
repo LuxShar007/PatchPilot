@@ -1052,6 +1052,31 @@ IndexError: list index out of range''';
           ),
         ),
         actions: [
+          // 1-Tap Quick Reset Testbed for Live Judging Demos
+          IconButton(
+            icon: const Icon(Icons.restore, color: Color(0xFF111111), size: 20),
+            tooltip: 'Reset Laptop Testbed to Baseline Bug',
+            onPressed: () async {
+              final res = await BridgeService.resetRemoteTestbed();
+              await _checkBridgeHealth();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        const Icon(Icons.refresh, color: Color(0xFF10B981), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(res['message']?.toString() ?? 'Laptop testbed reset to baseline!')),
+                      ],
+                    ),
+                    behavior: SnackBarBehavior.floating,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          ),
+
           // Live Bridge Ping Chip Button
           GestureDetector(
             onTap: _showBridgeQuickPanel,

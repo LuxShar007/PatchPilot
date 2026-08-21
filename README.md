@@ -225,12 +225,6 @@ RecTrace/
 
 ---
 
-## 🛡️ License
-
-Distributed under the **MIT License**. See `LICENSE` for more information.
-
----
-
 <div align="center">
   <sub>Built with ❤️ for the <strong>iQOO Hackathon</strong> by <strong>LuxShar</strong></sub>
 </div>

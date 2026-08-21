@@ -77,6 +77,9 @@ class _PatchInspectorScreenState extends State<PatchInspectorScreen> {
           duration: const Duration(seconds: 3),
         ),
       );
+    }
+  }
+
   Future<void> _handleExportPatchFile() async {
     final baseName = widget.diagnosticResult.targetFile.split('/').last.split('.').first;
     final patchFileName = 'fix_${baseName.isNotEmpty ? baseName : 'bug'}.patch';
